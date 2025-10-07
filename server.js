@@ -1,4 +1,4 @@
-// server.js - Versión PRODUCCIÓN con persistencia
+// server.js - VERSIÓN CON MATCHING REAL DE CLIENTES
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -20,11 +20,11 @@ const API_KEY = process.env.API_KEY || '68567';
 const API_TOKEN = process.env.TUSFACTURAS_API_TOKEN || '6aa4e9bbe67eb7d8a05b28ea378ef55f';
 const USER_TOKEN = process.env.USER_TOKEN || 'd527102f84b9a161f7f6ccbee824834610035e0a4a56c07c94f7afa4d0545244';
 
-console.log('🚀 Servidor en MODO PRODUCCIÓN');
-console.log('🔧 API Key:', API_KEY);
+console.log('🚀 Servidor en MODO PRODUCCIÓN con MATCHING REAL');
 
-// Storage en memoria para templates persistentes
+// Storage persistente con IDs REALES de TusFacturas
 let templatesGuardados = [];
+let clientesGuardados = []; // Ahora guardará { id: ID_REAL_TUSFACTURAS, nombre, email, documento }
 
 // Función helper para crear request base
 const createBaseRequest = () => ({
@@ -41,159 +41,62 @@ const formatDate = (date) => {
   return `${year}-${month}-${day}`;
 };
 
-// RUTA 1: Health check
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'TusFacturas API - SILVIA MONICA NAHABETIAN',
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    cuit: '27233141246',
-    pdv: '00006',
-    modo: 'PRODUCCIÓN',
-    templates_guardados: templatesGuardados.length
-  });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString()
-  });
-});
-
-// RUTA 2: Obtener clientes registrados REALES
-app.get('/api/clientes', async (req, res) => {
+// 🔍 NUEVA FUNCIÓN: Buscar cliente en TusFacturas por CUIT
+async function buscarClientePorCuit(cuit) {
   try {
-    console.log('🔍 Obteniendo clientes REALES de TusFacturas...');
-    
-    const requestData = createBaseRequest();
-    
-    // Probar primero con el endpoint de listado
-    let response;
-    let clientes = [];
-    
-    try {
-      console.log('Intentando con /clientes/listado...');
-      response = await axios.post(
-        `${TUSFACTURAS_BASE_URL}/clientes/listado`,
-        requestData,
-        { 
-          timeout: 15000,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
-      console.log('✅ Respuesta recibida de /clientes/listado');
-    } catch (err) {
-      console.log('⚠️ /clientes/listado falló, intentando con /clientes...');
-      response = await axios.post(
-        `${TUSFACTURAS_BASE_URL}/clientes`,
-        requestData,
-        { 
-          timeout: 15000,
-          headers: { 'Content-Type': 'application/json' }
-        }
-      );
-      console.log('✅ Respuesta recibida de /clientes');
-    }
-    
-    console.log('📦 Estructura de respuesta:', JSON.stringify(response.data).substring(0, 200));
-    
-    // Intentar extraer clientes de diferentes estructuras posibles
-    let clientesData = response.data;
-    
-    // Caso 1: Array directo
-    if (Array.isArray(clientesData)) {
-      clientes = clientesData;
-      console.log('📋 Estructura detectada: Array directo');
-    }
-    // Caso 2: Objeto con key "clientes"
-    else if (clientesData?.clientes && Array.isArray(clientesData.clientes)) {
-      clientes = clientesData.clientes;
-      console.log('📋 Estructura detectada: Objeto con key "clientes"');
-    }
-    // Caso 3: Objeto con key "data"
-    else if (clientesData?.data && Array.isArray(clientesData.data)) {
-      clientes = clientesData.data;
-      console.log('📋 Estructura detectada: Objeto con key "data"');
-    }
-    // Caso 4: Un solo cliente
-    else if (clientesData && typeof clientesData === 'object' && clientesData.id) {
-      clientes = [clientesData];
-      console.log('📋 Estructura detectada: Cliente único');
-    }
-    // Caso 5: Error de la API
-    else if (clientesData?.error === 'S') {
-      const errorMsg = clientesData.errores?.[0] || 'Error desconocido';
-      console.error('❌ Error de TusFacturas API:', errorMsg);
-      throw new Error(errorMsg);
-    }
-    
-    if (clientes.length === 0) {
-      console.log('⚠️ No se encontraron clientes en la respuesta');
-      console.log('📦 Respuesta completa:', JSON.stringify(response.data));
-    }
-    
-    // Formatear clientes
-    const clientesFormateados = clientes.map((cliente) => ({
-      id: cliente.id || cliente.cliente_id,
-      nombre: cliente.razon_social || cliente.nombre || cliente.cliente_nombre || 'Sin nombre',
-      email: cliente.email || cliente.cliente_email || 'sin-email@example.com',
-      documento: cliente.documento || cliente.cuit || cliente.cliente_cuit || '00000000000',
-      condicion_iva: cliente.condicion_iva || 'CF'
-    }));
-    
-    console.log(`✅ ${clientesFormateados.length} clientes formateados correctamente`);
-    
-    if (clientesFormateados.length > 0) {
-      console.log('👤 Primer cliente:', clientesFormateados[0].nombre);
-    }
-    
-    res.json(clientesFormateados);
-    
-  } catch (error) {
-    console.error('❌ Error obteniendo clientes:', {
-      message: error.message,
-      response: error.response?.data,
-      status: error.response?.status
-    });
-    
-    // Si falla completamente, devolver array vacío
-    console.log('⚠️ Devolviendo array vacío - los clientes se podrán agregar manualmente');
-    res.json([]);
-  }
-});
-
-// RUTA 3: Obtener templates (persistentes + del mes pasado si existen)
-app.get('/api/templates', async (req, res) => {
-  try {
-    console.log('📊 Obteniendo templates...');
-    
-    // Si ya hay templates guardados, devolverlos
-    if (templatesGuardados.length > 0) {
-      console.log(`✅ Devolviendo ${templatesGuardados.length} templates guardados`);
-      return res.json(templatesGuardados);
-    }
-    
-    // Si no hay guardados, intentar traer del mes pasado
-    console.log('🔍 Buscando facturas del mes anterior...');
-    
-    const now = new Date();
-    const mesAnterior = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const finMesAnterior = new Date(now.getFullYear(), now.getMonth(), 0);
-    
-    const fechaDesde = formatDate(mesAnterior);
-    const fechaHasta = formatDate(finMesAnterior);
-    
-    console.log(`📅 Período: ${fechaDesde} hasta ${fechaHasta}`);
+    console.log(`🔍 Buscando cliente con CUIT: ${cuit}`);
     
     const requestData = {
       ...createBaseRequest(),
-      fecha_desde: fechaDesde,
-      fecha_hasta: fechaHasta
+      documento: cuit
     };
     
     const response = await axios.post(
-      `${TUSFACTURAS_BASE_URL}/facturacion/buscar`,
+      `${TUSFACTURAS_BASE_URL}/clientes/consultar`,
+      requestData,
+      { 
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+    
+    if (response.data && response.data.id) {
+      console.log(`✅ Cliente encontrado - ID: ${response.data.id}`);
+      return {
+        id: response.data.id,
+        nombre: response.data.razon_social,
+        email: response.data.email,
+        documento: response.data.documento
+      };
+    }
+    
+    return null;
+    
+  } catch (error) {
+    console.log(`⚠️ Cliente no encontrado con CUIT ${cuit}`);
+    return null;
+  }
+}
+
+// 🆕 NUEVA FUNCIÓN: Crear cliente en TusFacturas
+async function crearClienteEnTusFacturas(cliente) {
+  try {
+    console.log(`➕ Creando cliente en TusFacturas: ${cliente.nombre}`);
+    
+    const requestData = {
+      ...createBaseRequest(),
+      cliente: {
+        razon_social: cliente.nombre,
+        documento: cliente.documento,
+        email: cliente.email || 'sin-email@example.com',
+        condicion_iva: 'CF', // Consumidor Final por defecto
+        domicilio: 'Sin especificar',
+        provincia: 1
+      }
+    };
+    
+    const response = await axios.post(
+      `${TUSFACTURAS_BASE_URL}/clientes/alta`,
       requestData,
       { 
         timeout: 15000,
@@ -201,59 +104,60 @@ app.get('/api/templates', async (req, res) => {
       }
     );
     
-    let facturas = [];
-    
-    // Manejar diferentes estructuras de respuesta
-    if (Array.isArray(response.data)) {
-      facturas = response.data;
-    } else if (response.data?.comprobantes && Array.isArray(response.data.comprobantes)) {
-      facturas = response.data.comprobantes;
+    if (response.data && response.data.id) {
+      console.log(`✅ Cliente creado - ID: ${response.data.id}`);
+      return {
+        id: response.data.id,
+        nombre: response.data.razon_social,
+        email: response.data.email,
+        documento: response.data.documento
+      };
     }
     
-    console.log(`📋 ${facturas.length} facturas encontradas`);
-    
-    // Filtrar solo facturas (no NC)
-    facturas = facturas.filter(f => {
-      const tipo = (f.tipo_comprobante || f.tipo || '').toString().toUpperCase();
-      return tipo.includes('FACTURA') && !tipo.includes('NOTA') && !tipo.includes('CREDITO');
-    });
-    
-    console.log(`✅ ${facturas.length} facturas válidas para templates`);
-    
-    // Formatear como templates
-    const templates = facturas.map((factura, index) => ({
-      id: index + 1,
-      clienteId: factura.cliente?.id || factura.cliente_id || 1,
-      concepto: factura.detalle?.[0]?.descripcion || factura.descripcion || 'Servicios profesionales - {MM_AAAA_ANTERIOR_TEXTO}',
-      monto: parseFloat(factura.importe_total || factura.total || 0),
-      selected: true
-    }));
-    
-    // Guardar templates en memoria
-    templatesGuardados = templates;
-    
-    res.json(templates);
+    throw new Error('No se pudo crear el cliente');
     
   } catch (error) {
-    console.error('❌ Error obteniendo templates:', error.message);
-    
-    // Si hay templates guardados, devolverlos aunque falle la API
-    if (templatesGuardados.length > 0) {
-      console.log('⚠️ Error en API pero hay templates guardados');
-      return res.json(templatesGuardados);
-    }
-    
-    // Si no hay nada, devolver array vacío para que agreguen manualmente
-    res.json([]);
+    console.error('❌ Error creando cliente:', error.response?.data || error.message);
+    throw error;
   }
+}
+
+// Health check
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'TusFacturas API - SILVIA MONICA NAHABETIAN',
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    cuit: '27233141246',
+    pdv: '00006',
+    modo: 'PRODUCCIÓN CON MATCHING REAL',
+    templates_guardados: templatesGuardados.length,
+    clientes_guardados: clientesGuardados.length
+  });
 });
 
-// RUTA 4: Guardar templates manualmente (persistencia)
+app.get('/health', (req, res) => {
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// RUTA: Obtener clientes guardados
+app.get('/api/clientes', (req, res) => {
+  console.log(`📋 Devolviendo ${clientesGuardados.length} clientes guardados`);
+  res.json(clientesGuardados);
+});
+
+// RUTA: Obtener templates
+app.get('/api/templates', (req, res) => {
+  console.log(`📊 Devolviendo ${templatesGuardados.length} templates guardados`);
+  res.json(templatesGuardados);
+});
+
+// RUTA: Guardar templates
 app.post('/api/templates/guardar', (req, res) => {
   try {
     const { templates } = req.body;
     templatesGuardados = templates;
-    console.log(`💾 ${templates.length} templates guardados en memoria`);
+    console.log(`💾 ${templates.length} templates guardados`);
     
     res.json({ 
       success: true, 
@@ -262,51 +166,90 @@ app.post('/api/templates/guardar', (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error guardando templates:', error);
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// RUTA 4B: Agregar cliente manualmente
-app.post('/api/clientes/agregar', (req, res) => {
+// RUTA: Guardar clientes
+app.post('/api/clientes/guardar', (req, res) => {
   try {
-    const { cliente } = req.body;
-    console.log('➕ Agregando cliente manual:', cliente.nombre);
-    
-    // En una implementación real, esto debería guardarse en una base de datos
-    // Por ahora solo confirmamos que se recibió
+    const { clientes } = req.body;
+    clientesGuardados = clientes;
+    console.log(`💾 ${clientes.length} clientes guardados`);
     
     res.json({ 
       success: true, 
-      message: 'Cliente agregado correctamente',
-      cliente: {
-        id: Date.now(), // ID temporal
-        ...cliente
-      }
+      message: 'Clientes guardados correctamente',
+      total: clientes.length
     });
   } catch (error) {
-    console.error('❌ Error agregando cliente:', error);
+    console.error('❌ Error guardando clientes:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 🆕 RUTA MEJORADA: Agregar cliente con matching real
+app.post('/api/clientes/agregar', async (req, res) => {
+  try {
+    const { cliente } = req.body;
+    console.log('➕ Procesando nuevo cliente:', cliente.nombre);
+    
+    // 1. Buscar si ya existe en TusFacturas
+    let clienteReal = await buscarClientePorCuit(cliente.documento);
+    
+    if (clienteReal) {
+      console.log(`✅ Cliente encontrado en TusFacturas - ID: ${clienteReal.id}`);
+    } else {
+      // 2. Si no existe, crearlo
+      console.log('⚠️ Cliente no existe, creando en TusFacturas...');
+      clienteReal = await crearClienteEnTusFacturas(cliente);
+    }
+    
+    // 3. Guardar en nuestra lista con el ID REAL
+    const clienteExistente = clientesGuardados.find(c => c.id === clienteReal.id);
+    
+    if (!clienteExistente) {
+      clientesGuardados.push(clienteReal);
+      console.log(`💾 Cliente agregado a la lista local - Total: ${clientesGuardados.length}`);
+    } else {
+      console.log('ℹ️ Cliente ya estaba en la lista local');
+    }
+    
+    res.json({ 
+      success: true, 
+      message: clienteReal ? 'Cliente encontrado y asociado' : 'Cliente creado correctamente',
+      cliente: clienteReal
+    });
+    
+  } catch (error) {
+    console.error('❌ Error procesando cliente:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message 
+      error: error.message,
+      detalle: error.response?.data
     });
   }
 });
 
-// RUTA 5: Enviar facturas masivamente (PRODUCCIÓN REAL)
+// RUTA MEJORADA: Enviar facturas con IDs REALES
 app.post('/api/enviar-facturas', async (req, res) => {
   const { templates } = req.body;
   const templatesSeleccionados = templates.filter(t => t.selected);
   const resultados = [];
   
-  console.log(`⚠️ ENVIANDO ${templatesSeleccionados.length} FACTURAS REALES A ARCA`);
+  console.log(`📤 ENVIANDO ${templatesSeleccionados.length} FACTURAS REALES A ARCA`);
   
   try {
     for (const template of templatesSeleccionados) {
       try {
-        console.log(`📝 Enviando factura para cliente ${template.clienteId}...`);
+        // Verificar que el clienteId sea REAL de TusFacturas
+        const clienteReal = clientesGuardados.find(c => c.id === template.clienteId);
+        
+        if (!clienteReal) {
+          throw new Error(`Cliente ID ${template.clienteId} no encontrado en la lista`);
+        }
+        
+        console.log(`📝 Enviando factura para: ${clienteReal.nombre} (ID: ${clienteReal.id})`);
         
         const facturaData = {
           ...createBaseRequest(),
@@ -314,7 +257,9 @@ app.post('/api/enviar-facturas', async (req, res) => {
             fecha: formatDate(new Date()),
             tipo_comprobante: 6, // Factura B
             punto_vta: 6,
-            cliente: { id: template.clienteId },
+            cliente: { 
+              id: clienteReal.id // ✅ ID REAL de TusFacturas
+            },
             detalle: [{
               descripcion: template.concepto,
               cantidad: 1,
@@ -333,24 +278,23 @@ app.post('/api/enviar-facturas', async (req, res) => {
           }
         );
         
-        // Verificar si hubo error
         if (response.data?.error === 'S') {
           const errorMsg = response.data.errores?.[0] || 'Error al enviar factura';
           throw new Error(errorMsg);
         }
         
-        console.log(`✅ Factura ${template.id} enviada exitosamente a ARCA`);
+        console.log(`✅ Factura enviada exitosamente - Cliente: ${clienteReal.nombre}`);
         
         resultados.push({
           templateId: template.id,
           success: true,
-          facturaId: response.data.numero || response.data.id || 'Procesado',
+          facturaId: response.data.numero || response.data.id,
+          cliente: clienteReal.nombre,
           mensaje: 'Factura enviada y procesada por ARCA',
           cae: response.data.cae,
           vencimiento_cae: response.data.vencimiento_cae
         });
         
-        // Pausa entre requests
         await new Promise(resolve => setTimeout(resolve, 1500));
         
       } catch (error) {
@@ -368,7 +312,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
     
     console.log(`🎯 Envío completado: ${exitosas} exitosas, ${fallidas} fallidas`);
     
-    // Actualizar templates guardados: desmarcar los enviados exitosamente
+    // Desmarcar exitosas
     templatesGuardados = templatesGuardados.map(t => {
       const resultado = resultados.find(r => r.templateId === t.id && r.success);
       return resultado ? { ...t, selected: false } : t;
@@ -391,7 +335,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
   }
 });
 
-// RUTA 6: Test de conexión
+// Test de conexión
 app.get('/api/test', async (req, res) => {
   try {
     console.log('🔍 Test de conexión con TusFacturas...');
@@ -412,15 +356,14 @@ app.get('/api/test', async (req, res) => {
     res.json({
       success: true,
       mensaje: 'Conexión exitosa con TusFacturas',
-      modo: 'PRODUCCIÓN'
+      modo: 'PRODUCCIÓN CON MATCHING REAL'
     });
     
   } catch (error) {
     console.error('❌ Error de conexión:', error.message);
     res.status(500).json({
       success: false,
-      error: error.message,
-      mensaje: 'Error de conexión con TusFacturas'
+      error: error.message
     });
   }
 });
@@ -446,7 +389,7 @@ const server = app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`👤 CUIT: 27233141246 - PDV: 00006`);
-  console.log(`⚠️ MODO PRODUCCIÓN - Envío REAL a ARCA`);
+  console.log(`✅ MODO: PRODUCCIÓN con MATCHING REAL de clientes`);
 });
 
 process.on('SIGTERM', () => {
