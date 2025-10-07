@@ -68,47 +68,84 @@ app.get('/api/clientes', async (req, res) => {
     
     const requestData = createBaseRequest();
     
-    const response = await axios.post(
-      `${TUSFACTURAS_BASE_URL}/clientes/listado`,
-      requestData,
-      { 
-        timeout: 15000,
-        headers: { 'Content-Type': 'application/json' }
-      }
-    );
-    
-    console.log('📦 Respuesta de API:', response.data);
-    
-    // Manejar diferentes estructuras de respuesta
-    let clientesData = response.data;
+    // Probar primero con el endpoint de listado
+    let response;
     let clientes = [];
     
-    // Si viene un array directo
+    try {
+      console.log('Intentando con /clientes/listado...');
+      response = await axios.post(
+        `${TUSFACTURAS_BASE_URL}/clientes/listado`,
+        requestData,
+        { 
+          timeout: 15000,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+      console.log('✅ Respuesta recibida de /clientes/listado');
+    } catch (err) {
+      console.log('⚠️ /clientes/listado falló, intentando con /clientes...');
+      response = await axios.post(
+        `${TUSFACTURAS_BASE_URL}/clientes`,
+        requestData,
+        { 
+          timeout: 15000,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+      console.log('✅ Respuesta recibida de /clientes');
+    }
+    
+    console.log('📦 Estructura de respuesta:', JSON.stringify(response.data).substring(0, 200));
+    
+    // Intentar extraer clientes de diferentes estructuras posibles
+    let clientesData = response.data;
+    
+    // Caso 1: Array directo
     if (Array.isArray(clientesData)) {
       clientes = clientesData;
+      console.log('📋 Estructura detectada: Array directo');
     }
-    // Si viene dentro de un objeto con la key "clientes"
+    // Caso 2: Objeto con key "clientes"
     else if (clientesData?.clientes && Array.isArray(clientesData.clientes)) {
       clientes = clientesData.clientes;
+      console.log('📋 Estructura detectada: Objeto con key "clientes"');
     }
-    // Si viene un solo cliente
+    // Caso 3: Objeto con key "data"
+    else if (clientesData?.data && Array.isArray(clientesData.data)) {
+      clientes = clientesData.data;
+      console.log('📋 Estructura detectada: Objeto con key "data"');
+    }
+    // Caso 4: Un solo cliente
     else if (clientesData && typeof clientesData === 'object' && clientesData.id) {
       clientes = [clientesData];
+      console.log('📋 Estructura detectada: Cliente único');
+    }
+    // Caso 5: Error de la API
+    else if (clientesData?.error === 'S') {
+      const errorMsg = clientesData.errores?.[0] || 'Error desconocido';
+      console.error('❌ Error de TusFacturas API:', errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    if (clientes.length === 0) {
+      console.log('⚠️ No se encontraron clientes en la respuesta');
+      console.log('📦 Respuesta completa:', JSON.stringify(response.data));
     }
     
     // Formatear clientes
     const clientesFormateados = clientes.map((cliente) => ({
-      id: cliente.id,
-      nombre: cliente.razon_social || cliente.nombre || 'Sin nombre',
-      email: cliente.email || 'sin-email@example.com',
-      documento: cliente.documento || cliente.cuit || '00000000000',
+      id: cliente.id || cliente.cliente_id,
+      nombre: cliente.razon_social || cliente.nombre || cliente.cliente_nombre || 'Sin nombre',
+      email: cliente.email || cliente.cliente_email || 'sin-email@example.com',
+      documento: cliente.documento || cliente.cuit || cliente.cliente_cuit || '00000000000',
       condicion_iva: cliente.condicion_iva || 'CF'
     }));
     
-    console.log(`✅ ${clientesFormateados.length} clientes reales obtenidos`);
+    console.log(`✅ ${clientesFormateados.length} clientes formateados correctamente`);
     
-    if (clientesFormateados.length === 0) {
-      console.log('⚠️ No hay clientes en la cuenta, verificar en TusFacturas');
+    if (clientesFormateados.length > 0) {
+      console.log('👤 Primer cliente:', clientesFormateados[0].nombre);
     }
     
     res.json(clientesFormateados);
@@ -120,7 +157,8 @@ app.get('/api/clientes', async (req, res) => {
       status: error.response?.status
     });
     
-    // Si falla la API, devolver array vacío para que se puedan agregar manualmente
+    // Si falla completamente, devolver array vacío
+    console.log('⚠️ Devolviendo array vacío - los clientes se podrán agregar manualmente');
     res.json([]);
   }
 });
@@ -224,6 +262,32 @@ app.post('/api/templates/guardar', (req, res) => {
     });
   } catch (error) {
     console.error('❌ Error guardando templates:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// RUTA 4B: Agregar cliente manualmente
+app.post('/api/clientes/agregar', (req, res) => {
+  try {
+    const { cliente } = req.body;
+    console.log('➕ Agregando cliente manual:', cliente.nombre);
+    
+    // En una implementación real, esto debería guardarse en una base de datos
+    // Por ahora solo confirmamos que se recibió
+    
+    res.json({ 
+      success: true, 
+      message: 'Cliente agregado correctamente',
+      cliente: {
+        id: Date.now(), // ID temporal
+        ...cliente
+      }
+    });
+  } catch (error) {
+    console.error('❌ Error agregando cliente:', error);
     res.status(500).json({ 
       success: false, 
       error: error.message 
