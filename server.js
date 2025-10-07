@@ -1,4 +1,4 @@
-// server.js - Versión FINAL con endpoints correctos de TusFacturas API v2
+// server.js - Versión PRODUCCIÓN con persistencia
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -19,13 +19,12 @@ const TUSFACTURAS_BASE_URL = 'https://www.tusfacturas.app/app/api/v2';
 const API_KEY = process.env.API_KEY || '68567';
 const API_TOKEN = process.env.TUSFACTURAS_API_TOKEN || '6aa4e9bbe67eb7d8a05b28ea378ef55f';
 const USER_TOKEN = process.env.USER_TOKEN || 'd527102f84b9a161f7f6ccbee824834610035e0a4a56c07c94f7afa4d0545244';
-const MODO_PRUEBA = process.env.MODO_PRUEBA === 'true';
 
-console.log('🔧 Configuración:', {
-  MODO_PRUEBA,
-  API_KEY,
-  API_TOKEN_PREVIEW: API_TOKEN.substring(0, 10) + '...'
-});
+console.log('🚀 Servidor en MODO PRODUCCIÓN');
+console.log('🔧 API Key:', API_KEY);
+
+// Storage en memoria para templates persistentes
+let templatesGuardados = [];
 
 // Función helper para crear request base
 const createBaseRequest = () => ({
@@ -50,69 +49,96 @@ app.get('/', (req, res) => {
     timestamp: new Date().toISOString(),
     cuit: '27233141246',
     pdv: '00006',
-    modo_prueba: MODO_PRUEBA
+    modo: 'PRODUCCIÓN',
+    templates_guardados: templatesGuardados.length
   });
 });
 
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
-    timestamp: new Date().toISOString(),
-    modo_prueba: MODO_PRUEBA
+    timestamp: new Date().toISOString()
   });
 });
 
-// RUTA 2: Obtener clientes registrados
+// RUTA 2: Obtener clientes registrados REALES
 app.get('/api/clientes', async (req, res) => {
   try {
-    console.log('🔍 Obteniendo clientes de TusFacturas...');
-    console.log('⚠️ Usando datos de ejemplo por problemas con la API');
+    console.log('🔍 Obteniendo clientes REALES de TusFacturas...');
     
-    // Por ahora usar datos de ejemplo mientras se resuelve el problema de la API
-    throw new Error('Usando modo fallback temporalmente');
+    const requestData = createBaseRequest();
     
-    // Procesar clientes
+    const response = await axios.post(
+      `${TUSFACTURAS_BASE_URL}/clientes/listado`,
+      requestData,
+      { 
+        timeout: 15000,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+    
+    console.log('📦 Respuesta de API:', response.data);
+    
+    // Manejar diferentes estructuras de respuesta
     let clientesData = response.data;
     let clientes = [];
     
+    // Si viene un array directo
     if (Array.isArray(clientesData)) {
       clientes = clientesData;
-    } else if (clientesData && typeof clientesData === 'object' && !clientesData.error) {
+    }
+    // Si viene dentro de un objeto con la key "clientes"
+    else if (clientesData?.clientes && Array.isArray(clientesData.clientes)) {
+      clientes = clientesData.clientes;
+    }
+    // Si viene un solo cliente
+    else if (clientesData && typeof clientesData === 'object' && clientesData.id) {
       clientes = [clientesData];
     }
     
-    const clientesFormateados = clientes.map((cliente, index) => ({
-      id: cliente.id || (index + 1),
+    // Formatear clientes
+    const clientesFormateados = clientes.map((cliente) => ({
+      id: cliente.id,
       nombre: cliente.razon_social || cliente.nombre || 'Sin nombre',
       email: cliente.email || 'sin-email@example.com',
       documento: cliente.documento || cliente.cuit || '00000000000',
       condicion_iva: cliente.condicion_iva || 'CF'
     }));
     
-    console.log(`✅ ${clientesFormateados.length} clientes obtenidos correctamente`);
+    console.log(`✅ ${clientesFormateados.length} clientes reales obtenidos`);
+    
+    if (clientesFormateados.length === 0) {
+      console.log('⚠️ No hay clientes en la cuenta, verificar en TusFacturas');
+    }
+    
     res.json(clientesFormateados);
     
   } catch (error) {
-    console.error('❌ Error obteniendo clientes:', error.message);
+    console.error('❌ Error obteniendo clientes:', {
+      message: error.message,
+      response: error.response?.data,
+      status: error.response?.status
+    });
     
-    // Fallback a datos de ejemplo
-    console.log('⚠️ Usando clientes de ejemplo (modo fallback)');
-    const clientesEjemplo = [
-      { id: 1, nombre: 'Cliente Ejemplo 1', email: 'cliente1@example.com', documento: '20123456789', condicion_iva: 'CF' },
-      { id: 2, nombre: 'Cliente Ejemplo 2', email: 'cliente2@example.com', documento: '27987654321', condicion_iva: 'RI' },
-      { id: 3, nombre: 'Cliente Ejemplo 3', email: 'cliente3@example.com', documento: '30456789012', condicion_iva: 'RI' },
-      { id: 4, nombre: 'Cliente Ejemplo 4', email: 'cliente4@example.com', documento: '33789456123', condicion_iva: 'RI' }
-    ];
-    res.json(clientesEjemplo);
+    // Si falla la API, devolver array vacío para que se puedan agregar manualmente
+    res.json([]);
   }
 });
 
-// RUTA 3: Obtener facturas del mes pasado como templates
+// RUTA 3: Obtener templates (persistentes + del mes pasado si existen)
 app.get('/api/templates', async (req, res) => {
   try {
-    console.log('📊 Generando templates del mes anterior...');
+    console.log('📊 Obteniendo templates...');
     
-    // Calcular fechas del mes anterior
+    // Si ya hay templates guardados, devolverlos
+    if (templatesGuardados.length > 0) {
+      console.log(`✅ Devolviendo ${templatesGuardados.length} templates guardados`);
+      return res.json(templatesGuardados);
+    }
+    
+    // Si no hay guardados, intentar traer del mes pasado
+    console.log('🔍 Buscando facturas del mes anterior...');
+    
     const now = new Date();
     const mesAnterior = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const finMesAnterior = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -120,7 +146,7 @@ app.get('/api/templates', async (req, res) => {
     const fechaDesde = formatDate(mesAnterior);
     const fechaHasta = formatDate(finMesAnterior);
     
-    console.log(`📅 Buscando facturas desde ${fechaDesde} hasta ${fechaHasta}`);
+    console.log(`📅 Período: ${fechaDesde} hasta ${fechaHasta}`);
     
     const requestData = {
       ...createBaseRequest(),
@@ -137,20 +163,21 @@ app.get('/api/templates', async (req, res) => {
       }
     );
     
-    // Verificar errores
-    if (response.data?.error === 'S') {
-      const errorMsg = response.data.errores?.[0] || 'Error al buscar facturas';
-      console.error('❌ Error de TusFacturas:', errorMsg);
-      throw new Error(errorMsg);
+    let facturas = [];
+    
+    // Manejar diferentes estructuras de respuesta
+    if (Array.isArray(response.data)) {
+      facturas = response.data;
+    } else if (response.data?.comprobantes && Array.isArray(response.data.comprobantes)) {
+      facturas = response.data.comprobantes;
     }
     
-    let facturas = Array.isArray(response.data) ? response.data : [];
-    console.log(`📋 ${facturas.length} facturas encontradas del período`);
+    console.log(`📋 ${facturas.length} facturas encontradas`);
     
     // Filtrar solo facturas (no NC)
     facturas = facturas.filter(f => {
-      const tipo = (f.tipo_comprobante || f.tipo || '').toString();
-      return tipo.includes('FACTURA') && !tipo.includes('NOTA');
+      const tipo = (f.tipo_comprobante || f.tipo || '').toString().toUpperCase();
+      return tipo.includes('FACTURA') && !tipo.includes('NOTA') && !tipo.includes('CREDITO');
     });
     
     console.log(`✅ ${facturas.length} facturas válidas para templates`);
@@ -158,73 +185,64 @@ app.get('/api/templates', async (req, res) => {
     // Formatear como templates
     const templates = facturas.map((factura, index) => ({
       id: index + 1,
-      facturaOriginalId: factura.id,
       clienteId: factura.cliente?.id || factura.cliente_id || 1,
       concepto: factura.detalle?.[0]?.descripcion || factura.descripcion || 'Servicios profesionales - {MM_AAAA_ANTERIOR_TEXTO}',
       monto: parseFloat(factura.importe_total || factura.total || 0),
-      selected: true,
-      fechaOriginal: factura.fecha,
-      numeroOriginal: factura.numero
+      selected: true
     }));
+    
+    // Guardar templates en memoria
+    templatesGuardados = templates;
     
     res.json(templates);
     
   } catch (error) {
     console.error('❌ Error obteniendo templates:', error.message);
     
-    // Fallback a templates de ejemplo
-    console.log('⚠️ Usando templates de ejemplo (modo fallback)');
-    const templatesEjemplo = [
-      { id: 1, clienteId: 1, concepto: 'Honorarios Profesionales - {MM_AAAA_ANTERIOR_TEXTO}', monto: 150000, selected: true },
-      { id: 2, clienteId: 2, concepto: 'Servicios de consultoría - {MM_AAAA_ANTERIOR_TEXTO}', monto: 85000, selected: true },
-      { id: 3, clienteId: 3, concepto: 'Asesoramiento técnico - {MM_AAAA_ANTERIOR_TEXTO}', monto: 120000, selected: true },
-      { id: 4, clienteId: 4, concepto: 'Auditoría mensual - {MM_AAAA_ANTERIOR_TEXTO}', monto: 95000, selected: true }
-    ];
-    res.json(templatesEjemplo);
+    // Si hay templates guardados, devolverlos aunque falle la API
+    if (templatesGuardados.length > 0) {
+      console.log('⚠️ Error en API pero hay templates guardados');
+      return res.json(templatesGuardados);
+    }
+    
+    // Si no hay nada, devolver array vacío para que agreguen manualmente
+    res.json([]);
   }
 });
 
-// RUTA 4: Enviar facturas masivamente
+// RUTA 4: Guardar templates manualmente (persistencia)
+app.post('/api/templates/guardar', (req, res) => {
+  try {
+    const { templates } = req.body;
+    templatesGuardados = templates;
+    console.log(`💾 ${templates.length} templates guardados en memoria`);
+    
+    res.json({ 
+      success: true, 
+      message: 'Templates guardados correctamente',
+      total: templates.length
+    });
+  } catch (error) {
+    console.error('❌ Error guardando templates:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// RUTA 5: Enviar facturas masivamente (PRODUCCIÓN REAL)
 app.post('/api/enviar-facturas', async (req, res) => {
   const { templates } = req.body;
   const templatesSeleccionados = templates.filter(t => t.selected);
   const resultados = [];
   
-  if (MODO_PRUEBA) {
-    console.log('🧪 MODO PRUEBA - Simulando envío (NO se tocan facturas reales)');
-    console.log(`📤 Simulando ${templatesSeleccionados.length} facturas...`);
-    
-    for (const template of templatesSeleccionados) {
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      resultados.push({
-        templateId: template.id,
-        success: true,
-        facturaId: 'SIMULADO-' + Math.floor(Math.random() * 10000),
-        mensaje: '🧪 SIMULACIÓN - Factura NO enviada a ARCA'
-      });
-      
-      console.log(`✅ [SIMULADO] Factura ${template.id} - Cliente: ${template.clienteId} - $${template.monto}`);
-    }
-    
-    return res.json({
-      success: true,
-      total: templatesSeleccionados.length,
-      exitosas: templatesSeleccionados.length,
-      fallidas: 0,
-      detalles: resultados,
-      modo_prueba: true,
-      mensaje: '⚠️ MODO PRUEBA - Las facturas NO fueron enviadas a ARCA'
-    });
-  }
-  
-  // MODO PRODUCCIÓN - Envío REAL a ARCA
-  console.log(`⚠️ MODO PRODUCCIÓN - Enviando ${templatesSeleccionados.length} facturas REALES`);
+  console.log(`⚠️ ENVIANDO ${templatesSeleccionados.length} FACTURAS REALES A ARCA`);
   
   try {
     for (const template of templatesSeleccionados) {
       try {
-        console.log(`📝 Enviando factura real para cliente ${template.clienteId}...`);
+        console.log(`📝 Enviando factura para cliente ${template.clienteId}...`);
         
         const facturaData = {
           ...createBaseRequest(),
@@ -251,27 +269,32 @@ app.post('/api/enviar-facturas', async (req, res) => {
           }
         );
         
+        // Verificar si hubo error
         if (response.data?.error === 'S') {
-          throw new Error(response.data.errores?.[0] || 'Error al enviar');
+          const errorMsg = response.data.errores?.[0] || 'Error al enviar factura';
+          throw new Error(errorMsg);
         }
         
-        console.log(`✅ Factura ${template.id} enviada a ARCA exitosamente`);
+        console.log(`✅ Factura ${template.id} enviada exitosamente a ARCA`);
         
         resultados.push({
           templateId: template.id,
           success: true,
           facturaId: response.data.numero || response.data.id || 'Procesado',
-          mensaje: 'Factura enviada y procesada por ARCA'
+          mensaje: 'Factura enviada y procesada por ARCA',
+          cae: response.data.cae,
+          vencimiento_cae: response.data.vencimiento_cae
         });
         
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        // Pausa entre requests
+        await new Promise(resolve => setTimeout(resolve, 1500));
         
       } catch (error) {
         console.error(`❌ Error enviando factura ${template.id}:`, error.message);
         resultados.push({
           templateId: template.id,
           success: false,
-          error: error.message
+          error: error.response?.data?.errores?.[0] || error.message
         });
       }
     }
@@ -281,13 +304,18 @@ app.post('/api/enviar-facturas', async (req, res) => {
     
     console.log(`🎯 Envío completado: ${exitosas} exitosas, ${fallidas} fallidas`);
     
+    // Actualizar templates guardados: desmarcar los enviados exitosamente
+    templatesGuardados = templatesGuardados.map(t => {
+      const resultado = resultados.find(r => r.templateId === t.id && r.success);
+      return resultado ? { ...t, selected: false } : t;
+    });
+    
     res.json({
       success: true,
       total: templatesSeleccionados.length,
       exitosas,
       fallidas,
-      detalles: resultados,
-      modo_prueba: false
+      detalles: resultados
     });
     
   } catch (error) {
@@ -299,26 +327,36 @@ app.post('/api/enviar-facturas', async (req, res) => {
   }
 });
 
-// RUTA 5: Test de conexión simplificado
+// RUTA 6: Test de conexión
 app.get('/api/test', async (req, res) => {
   try {
-    console.log('🔍 Test de conexión...');
-    console.log('⚠️ Modo demo activo - usando datos de ejemplo');
+    console.log('🔍 Test de conexión con TusFacturas...');
     
-    // Por ahora retornar éxito para testing
+    const requestData = createBaseRequest();
+    
+    const response = await axios.post(
+      `${TUSFACTURAS_BASE_URL}/clientes/listado`,
+      requestData,
+      { 
+        timeout: 10000,
+        headers: { 'Content-Type': 'application/json' }
+      }
+    );
+    
+    console.log('✅ Conexión exitosa con TusFacturas');
+    
     res.json({
       success: true,
-      mensaje: 'Sistema funcionando en modo demo',
-      modo: 'fallback',
-      nota: 'Usando datos de ejemplo mientras se configura la API'
+      mensaje: 'Conexión exitosa con TusFacturas',
+      modo: 'PRODUCCIÓN'
     });
     
   } catch (error) {
-    console.error('❌ Error:', error.message);
+    console.error('❌ Error de conexión:', error.message);
     res.status(500).json({
       success: false,
       error: error.message,
-      mensaje: 'Error de conexión'
+      mensaje: 'Error de conexión con TusFacturas'
     });
   }
 });
@@ -341,11 +379,10 @@ app.use('*', (req, res) => {
 
 // Iniciar servidor
 const server = app.listen(PORT, () => {
-  console.log(`🚀 Servidor TusFacturas corriendo en puerto ${PORT}`);
+  console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`👤 CUIT: 27233141246 - PDV: 00006`);
-  console.log(`🔗 API Key: ${API_KEY}`);
-  console.log(`${MODO_PRUEBA ? '🧪 MODO PRUEBA ACTIVADO (sin envío real)' : '⚠️ MODO PRODUCCIÓN (envío real a ARCA)'}`);
+  console.log(`⚠️ MODO PRODUCCIÓN - Envío REAL a ARCA`);
 });
 
 process.on('SIGTERM', () => {
