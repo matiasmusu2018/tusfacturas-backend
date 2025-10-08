@@ -1,5 +1,5 @@
-// server.js - VERSIÓN FINAL PRODUCCIÓN
-// Basado en documentación oficial TusFacturas API v2
+// server.js - VERSIÓN CORREGIDA
+// Backend para TusFacturas API v2
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -20,9 +20,9 @@ const API_TOKEN = process.env.TUSFACTURAS_API_TOKEN || '6aa4e9bbe67eb7d8a05b28ea
 const USER_TOKEN = process.env.USER_TOKEN || 'd527102f84b9a161f7f6ccbee824834610035e0a4a56c07c94f7afa4d0545244';
 
 console.log('🚀 Servidor TusFacturas - PRODUCCIÓN');
-console.log('📄 Basado en docs oficiales: developers.tusfacturas.app');
+console.log('📄 API v2: developers.tusfacturas.app');
 
-// Storage en memoria (persiste mientras el servidor esté activo)
+// Storage en memoria
 let templatesGuardados = [];
 let clientesGuardados = [];
 
@@ -32,11 +32,12 @@ const createBaseRequest = () => ({
   usertoken: USER_TOKEN
 });
 
+// ✅ FORMATO CORRECTO: DD/MM/YYYY
 const formatDate = (date) => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const year = date.getFullYear();
+  return `${day}/${month}/${year}`;
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -64,15 +65,11 @@ app.get('/health', (req, res) => {
 // GESTIÓN LOCAL DE CLIENTES
 // ═══════════════════════════════════════════════════════════════
 
-// Obtener clientes guardados localmente
 app.get('/api/clientes', (req, res) => {
   console.log(`📋 Devolviendo ${clientesGuardados.length} clientes locales`);
   res.json(clientesGuardados);
 });
 
-// Agregar cliente a la lista local
-// IMPORTANTE: TusFacturas NO tiene endpoint para crear clientes
-// Los clientes se crean automáticamente al enviar la primera factura
 app.post('/api/clientes/agregar', (req, res) => {
   try {
     const { cliente } = req.body;
@@ -83,7 +80,6 @@ app.post('/api/clientes/agregar', (req, res) => {
     console.log(`   CUIT: ${cliente.documento}`);
     console.log(`   Email: ${cliente.email || '(sin email)'}`);
     
-    // Generar ID único local
     const nuevoId = clientesGuardados.length > 0 
       ? Math.max(...clientesGuardados.map(c => c.id)) + 1 
       : 1;
@@ -91,19 +87,17 @@ app.post('/api/clientes/agregar', (req, res) => {
     const clienteNuevo = {
       id: nuevoId,
       nombre: cliente.nombre,
-      documento: cliente.documento,
+      documento: cliente.documento.replace(/-/g, ''), // Limpiar guiones
       email: cliente.email || '',
-      tipo_documento: 'CUIT', // Por defecto para facturas B
-      origen: 'manual' // Indica que fue agregado manualmente
+      tipo_documento: 'CUIT',
+      origen: 'manual'
     };
     
-    // Verificar si ya existe por documento
-    const yaExiste = clientesGuardados.find(c => c.documento === cliente.documento);
+    const yaExiste = clientesGuardados.find(c => c.documento === clienteNuevo.documento);
     
     if (yaExiste) {
       console.log('⚠️  Cliente ya existe en lista local');
       console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
-      
       return res.json({
         success: true,
         message: 'Cliente ya existe',
@@ -111,7 +105,6 @@ app.post('/api/clientes/agregar', (req, res) => {
       });
     }
     
-    // Agregar a la lista
     clientesGuardados.push(clienteNuevo);
     
     console.log(`✅ Cliente agregado - Total: ${clientesGuardados.length}`);
@@ -134,7 +127,6 @@ app.post('/api/clientes/agregar', (req, res) => {
   }
 });
 
-// Guardar clientes (para persistencia local)
 app.post('/api/clientes/guardar', (req, res) => {
   try {
     const { clientes } = req.body;
@@ -176,13 +168,12 @@ app.post('/api/enviar-facturas', async (req, res) => {
   const resultados = [];
   
   console.log('\n╔════════════════════════════════════════════════════╗');
-  console.log(`║  ENVIANDO ${templatesSeleccionados.length} FACTURAS REALES A ARCA       ║`);
+  console.log(`║  ENVIANDO ${templatesSeleccionados.length} FACTURAS A ARCA                     ║`);
   console.log('╚════════════════════════════════════════════════════╝\n');
   
   try {
     for (const template of templatesSeleccionados) {
       try {
-        // Buscar datos del cliente
         const cliente = clientesGuardados.find(c => c.id === template.clienteId);
         
         if (!cliente) {
@@ -192,46 +183,56 @@ app.post('/api/enviar-facturas', async (req, res) => {
         console.log(`📝 Factura para: ${cliente.nombre}`);
         console.log(`   CUIT: ${cliente.documento}`);
         console.log(`   Email: ${cliente.email || '(sin email)'}`);
+        console.log(`   Concepto: ${template.concepto}`);
         console.log(`   Monto: $${template.monto}`);
         
-        // Construir request según documentación oficial
-        // https://developers.tusfacturas.app/api-factura-electronica-afip-facturacion-ventas/referencia-api-afip-arca
+        // ✅ Estructura CORRECTA según API v2
         const facturaData = {
           ...createBaseRequest(),
           cliente: {
-            documento_tipo: cliente.tipo_documento || 'CUIT',
+            documento_tipo: 'CUIT',
             documento_nro: cliente.documento,
             razon_social: cliente.nombre,
-            email: cliente.email || '', // Opcional según docs
-            domicilio: 'Sin especificar', // Requerido
-            provincia: '1', // Requerido (CABA)
+            email: cliente.email || '',
+            domicilio: 'Ciudad Autónoma de Buenos Aires',
+            provincia: '1', // CABA
             envia_por_mail: cliente.email ? 'S' : 'N',
-            condicion_iva: 'CF', // Consumidor Final
+            condicion_iva: 'CF', // Consumidor Final para Factura B
             condicion_pago: '0' // Contado
           },
           comprobante: {
-            fecha: formatDate(new Date()),
-            tipo: 'FACTURA B', // Factura B según tu configuración
-            operacion: 'V', // Venta
-            idioma: '1', // Español
-            punto_venta: '6', // Tu PDV
-            moneda: 'PES', // Pesos argentinos
-            cotizacion: '1', // 1:1 para pesos
-            detalle: [{
+            fecha: formatDate(new Date()), // ✅ DD/MM/YYYY
+            tipo: 'FACTURA B',
+            operacion: 'V',
+            punto_venta: '6',
+            moneda: 'PES',
+            cotizacion: '1',
+            idioma: '1',
+            items: [{ // ✅ "items" no "detalle"
               cantidad: '1',
               afecta_stock: 'N',
+              bonificacion_porcentaje: '0',
               producto: {
                 descripcion: template.concepto,
                 unidad_bulto: '1',
                 lista_precios: 'SERVICIOS',
-                codigo: `SERV-${template.id}`,
-                precio_unitario_sin_iva: template.monto.toString(),
-                alicuota: '21', // IVA 21%
-                unidad_medida: '7' // Unidades
+                codigo: '',
+                precio_unitario_sin_iva: template.monto.toFixed(2),
+                alicuota: '21',
+                unidad_medida: '7'
               }
-            }]
+            }],
+            bonificacion: '0',
+            leyenda_gral: ''
           }
         };
+        
+        console.log('   📤 Request a TusFacturas:');
+        console.log('   ', JSON.stringify({
+          fecha: facturaData.comprobante.fecha,
+          cliente: facturaData.cliente.razon_social,
+          monto: template.monto
+        }, null, 2));
         
         console.log('   🚀 Enviando a TusFacturas API...');
         
@@ -244,7 +245,9 @@ app.post('/api/enviar-facturas', async (req, res) => {
           }
         );
         
-        // Verificar respuesta
+        console.log('   📥 Respuesta de TusFacturas:', JSON.stringify(response.data, null, 2));
+        
+        // Verificar errores
         if (response.data?.error === 'S') {
           const errorMsg = response.data.errores?.[0] || 'Error desconocido';
           throw new Error(errorMsg);
@@ -265,11 +268,13 @@ app.post('/api/enviar-facturas', async (req, res) => {
           pdf_url: response.data.pdf_url
         });
         
-        // Pausa entre facturas (buena práctica)
+        // Pausa entre facturas
         await new Promise(resolve => setTimeout(resolve, 1500));
         
       } catch (error) {
-        console.error(`   ❌ ERROR: ${error.message}\n`);
+        console.error(`   ❌ ERROR: ${error.message}`);
+        console.error('   Detalles:', error.response?.data || error);
+        console.log('');
         
         resultados.push({
           templateId: template.id,
@@ -287,10 +292,12 @@ app.post('/api/enviar-facturas', async (req, res) => {
     console.log('╚════════════════════════════════════════════════════╝\n');
     
     // Desmarcar las exitosas
-    templatesGuardados = templatesGuardados.map(t => {
-      const resultado = resultados.find(r => r.templateId === t.id && r.success);
-      return resultado ? { ...t, selected: false } : t;
-    });
+    if (exitosas > 0) {
+      templatesGuardados = templatesGuardados.map(t => {
+        const resultado = resultados.find(r => r.templateId === t.id && r.success);
+        return resultado ? { ...t, selected: false } : t;
+      });
+    }
     
     res.json({
       success: true,
