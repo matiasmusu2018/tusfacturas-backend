@@ -186,7 +186,8 @@ app.post('/api/enviar-facturas', async (req, res) => {
         console.log(`   Concepto: ${template.concepto}`);
         console.log(`   Monto: $${template.monto}`);
         
-        // ✅ Estructura CORRECTA según API v2
+        // ✅ Estructura CORRECTA según API v2 - FACTURA A
+        const fechaHoy = new Date();
         const facturaData = {
           ...createBaseRequest(),
           cliente: {
@@ -197,17 +198,18 @@ app.post('/api/enviar-facturas', async (req, res) => {
             domicilio: 'Ciudad Autónoma de Buenos Aires',
             provincia: '1', // CABA
             envia_por_mail: cliente.email ? 'S' : 'N',
-            condicion_iva: 'CF', // Consumidor Final para Factura B
+            condicion_iva: 'RI', // ✅ RESPONSABLE INSCRIPTO para Factura A
             condicion_pago: '0' // Contado
           },
           comprobante: {
-            fecha: formatDate(new Date()), // ✅ DD/MM/YYYY
-            tipo: 'FACTURA B',
+            fecha: formatDate(fechaHoy), // ✅ DD/MM/YYYY
+            tipo: 'FACTURA A', // ✅ FACTURA A
             operacion: 'V',
             punto_venta: '6',
             moneda: 'PES',
             cotizacion: '1',
             idioma: '1',
+            fecha_vencimiento: formatDate(fechaHoy), // ✅ CAMPO REQUERIDO - mismo día para contado
             items: [{ // ✅ "items" no "detalle"
               cantidad: '1',
               afecta_stock: 'N',
