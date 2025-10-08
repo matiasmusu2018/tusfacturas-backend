@@ -209,8 +209,8 @@ app.post('/api/enviar-facturas', async (req, res) => {
             moneda: 'PES',
             cotizacion: '1',
             idioma: '1',
-            fecha_vencimiento: formatDate(fechaHoy), // ✅ CAMPO REQUERIDO - mismo día para contado
-            items: [{ // ✅ "items" no "detalle"
+            // ✅ NO ENVIAR fecha_vencimiento - TusFacturas lo calcula automáticamente
+            items: [{ 
               cantidad: '1',
               afecta_stock: 'N',
               bonificacion_porcentaje: '0',
