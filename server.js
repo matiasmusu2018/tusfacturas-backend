@@ -229,12 +229,8 @@ app.post('/api/enviar-facturas', async (req, res) => {
           }
         };
         
-        console.log('   📤 Request a TusFacturas:');
-        console.log('   ', JSON.stringify({
-          fecha: facturaData.comprobante.fecha,
-          cliente: facturaData.cliente.razon_social,
-          monto: template.monto
-        }, null, 2));
+        console.log('   📤 REQUEST COMPLETO A TUSFACTURAS:');
+        console.log(JSON.stringify(facturaData, null, 2));
         
         console.log('   🚀 Enviando a TusFacturas API...');
         
