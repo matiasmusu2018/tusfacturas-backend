@@ -199,7 +199,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
             provincia: '1', // CABA
             envia_por_mail: cliente.email ? 'S' : 'N',
             condicion_iva: 'RI', // ✅ RESPONSABLE INSCRIPTO para Factura A
-            condicion_pago: '0' // Contado
+            condicion_pago: '0' // Contado - calcula vencimiento automático
           },
           comprobante: {
             fecha: formatDate(fechaHoy), // ✅ DD/MM/YYYY
@@ -209,8 +209,12 @@ app.post('/api/enviar-facturas', async (req, res) => {
             moneda: 'PES',
             cotizacion: '1',
             idioma: '1',
-            // ✅ NO ENVIAR fecha_vencimiento - TusFacturas lo calcula automáticamente
-            items: [{ 
+            // ✅ vencimiento se calcula automáticamente según condicion_pago
+            periodo_facturado_desde: formatDate(fechaHoy),
+            periodo_facturado_hasta: formatDate(fechaHoy),
+            rubro: 'Servicios Profesionales',
+            rubro_grupo_contable: 'servicios',
+            detalle: [{ 
               cantidad: '1',
               afecta_stock: 'N',
               bonificacion_porcentaje: '0',
@@ -221,8 +225,11 @@ app.post('/api/enviar-facturas', async (req, res) => {
                 codigo: '',
                 precio_unitario_sin_iva: template.monto.toFixed(2),
                 alicuota: '21',
-                unidad_medida: '7'
-              }
+                unidad_medida: '7',
+                actualiza_precio: 'N',
+                rg5329: 'N'
+              },
+              leyenda: ''
             }],
             bonificacion: '0',
             leyenda_gral: ''
