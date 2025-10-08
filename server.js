@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CORREGIDA
+// server.js - VERSIÓN CORREGIDA CON FECHA DE VENCIMIENTO
 // Backend para TusFacturas API v2
 const express = require('express');
 const cors = require('cors');
@@ -186,8 +186,19 @@ app.post('/api/enviar-facturas', async (req, res) => {
         console.log(`   Concepto: ${template.concepto}`);
         console.log(`   Monto: $${template.monto}`);
         
-        // ✅ Estructura CORRECTA según API v2 - FACTURA A
         const fechaHoy = new Date();
+
+        // ✅ CAMBIO: cálculo automático de fecha de vencimiento
+        const condicionPago = '0'; // contado (si luego querés, puede venir de template o cliente)
+        const calcularVencimiento = (fechaBase, condicion) => {
+          const v = new Date(fechaBase);
+          const dias = parseInt(condicion, 10);
+          if (!isNaN(dias) && dias > 0) v.setDate(v.getDate() + dias);
+          return v;
+        };
+        const fechaVencimiento = calcularVencimiento(fechaHoy, condicionPago);
+
+        // ✅ CAMBIO: agregar "vencimiento" al comprobante
         const facturaData = {
           ...createBaseRequest(),
           cliente: {
@@ -196,20 +207,20 @@ app.post('/api/enviar-facturas', async (req, res) => {
             razon_social: cliente.nombre,
             email: cliente.email || '',
             domicilio: 'Ciudad Autónoma de Buenos Aires',
-            provincia: '1', // CABA
+            provincia: '1',
             envia_por_mail: cliente.email ? 'S' : 'N',
-            condicion_iva: 'RI', // ✅ RESPONSABLE INSCRIPTO para Factura A
-            condicion_pago: '0' // Contado - calcula vencimiento automático
+            condicion_iva: 'RI',
+            condicion_pago: condicionPago
           },
           comprobante: {
-            fecha: formatDate(fechaHoy), // ✅ DD/MM/YYYY
-            tipo: 'FACTURA A', // ✅ FACTURA A
+            fecha: formatDate(fechaHoy),
+            vencimiento: formatDate(fechaVencimiento), // ✅ agregado
+            tipo: 'FACTURA A',
             operacion: 'V',
             punto_venta: '6',
             moneda: 'PES',
             cotizacion: '1',
             idioma: '1',
-            // ✅ vencimiento se calcula automáticamente según condicion_pago
             periodo_facturado_desde: formatDate(fechaHoy),
             periodo_facturado_hasta: formatDate(fechaHoy),
             rubro: 'Servicios Profesionales',
@@ -252,7 +263,6 @@ app.post('/api/enviar-facturas', async (req, res) => {
         
         console.log('   📥 Respuesta de TusFacturas:', JSON.stringify(response.data, null, 2));
         
-        // Verificar errores
         if (response.data?.error === 'S') {
           const errorMsg = response.data.errores?.[0] || 'Error desconocido';
           throw new Error(errorMsg);
@@ -273,7 +283,6 @@ app.post('/api/enviar-facturas', async (req, res) => {
           pdf_url: response.data.pdf_url
         });
         
-        // Pausa entre facturas
         await new Promise(resolve => setTimeout(resolve, 1500));
         
       } catch (error) {
@@ -296,7 +305,6 @@ app.post('/api/enviar-facturas', async (req, res) => {
     console.log(`║  RESULTADO: ${exitosas} exitosas | ${fallidas} fallidas           ║`);
     console.log('╚════════════════════════════════════════════════════╝\n');
     
-    // Desmarcar las exitosas
     if (exitosas > 0) {
       templatesGuardados = templatesGuardados.map(t => {
         const resultado = resultados.find(r => r.templateId === t.id && r.success);
