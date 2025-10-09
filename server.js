@@ -61,8 +61,28 @@ const leerDesdeJSONBin = async (binId, tipo) => {
     );
     
     const datos = response.data.record;
+    
+    // Validar que sea array
+    if (!Array.isArray(datos)) {
+      console.warn(`⚠️  Datos de ${tipo} no son array, inicializando vacío`);
+      return [];
+    }
+    
+    // Validar estructura de templates
+    if (tipo === 'templates' && datos.length > 0) {
+      datos.forEach((t, idx) => {
+        if (typeof t.monto === 'undefined') {
+          console.warn(`⚠️  Template ${idx} sin 'monto', corrigiendo...`);
+          t.monto = 0;
+        }
+        if (typeof t.selected === 'undefined') {
+          t.selected = false;
+        }
+      });
+    }
+    
     console.log(`✅ ${tipo} cargados: ${datos.length} registros`);
-    return Array.isArray(datos) ? datos : [];
+    return datos;
     
   } catch (error) {
     console.error(`❌ Error leyendo ${tipo} de JSONBin:`, error.message);
@@ -256,14 +276,18 @@ app.get('/api/templates', async (req, res) => {
   try {
     // Recargar desde JSONBin
     const datosActualizados = await leerDesdeJSONBin(JSONBIN_TEMPLATES_BIN_ID, 'templates');
-    if (datosActualizados) {
+    if (datosActualizados && Array.isArray(datosActualizados)) {
       templatesGuardados = datosActualizados;
     }
     
-    res.json(templatesGuardados);
+    console.log(`📊 Devolviendo ${templatesGuardados.length} templates`);
+    console.log('   Estructura:', templatesGuardados.length > 0 ? Object.keys(templatesGuardados[0]) : 'sin datos');
+    
+    // SIEMPRE devolver un array
+    res.json(Array.isArray(templatesGuardados) ? templatesGuardados : []);
   } catch (error) {
     console.error('Error obteniendo templates:', error);
-    res.json(templatesGuardados); // Devolver cache si falla
+    res.json([]); // Array vacío si hay error
   }
 });
 
