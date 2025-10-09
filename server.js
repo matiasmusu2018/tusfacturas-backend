@@ -6,7 +6,10 @@ require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
+// 🔍 DEBUG: imprimir variables de entorno
+console.log('🚨 JSONBIN_KEY:', process.env.JSONBIN_KEY);
+console.log('🚨 JSONBIN_CLIENTES_BIN:', process.env.JSONBIN_CLIENTES_BIN);
+console.log('🚨 JSONBIN_TEMPLATES_BIN:', process.env.JSONBIN_TEMPLATES_BIN);
 app.use(cors({
   origin: ['https://tusfacturasapp.netlify.app', 'http://localhost:3000'],
   credentials: true
