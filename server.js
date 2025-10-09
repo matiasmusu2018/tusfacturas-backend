@@ -184,15 +184,18 @@ app.get('/api/clientes', async (req, res) => {
   try {
     // Recargar desde JSONBin
     const datosActualizados = await leerDesdeJSONBin(JSONBIN_CLIENTES_BIN_ID, 'clientes');
-    if (datosActualizados) {
+    if (datosActualizados && Array.isArray(datosActualizados)) {
       clientesGuardados = datosActualizados;
     }
     
     console.log(`📋 Devolviendo ${clientesGuardados.length} clientes`);
-    res.json(clientesGuardados);
+    console.log('   Estructura:', clientesGuardados.length > 0 ? Object.keys(clientesGuardados[0]) : 'sin datos');
+    
+    // SIEMPRE devolver un array
+    res.json(Array.isArray(clientesGuardados) ? clientesGuardados : []);
   } catch (error) {
     console.error('Error obteniendo clientes:', error);
-    res.json(clientesGuardados); // Devolver cache si falla
+    res.json([]); // Array vacío si hay error
   }
 });
 
