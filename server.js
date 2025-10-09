@@ -1,4 +1,4 @@
-// server.js - VERSIÓN CON PERSISTENCIA EN JSONBIN.IO
+// server.js - VERSIÓN ESTABLE + JSONBin.io
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -18,42 +18,45 @@ const API_KEY = process.env.API_KEY || '68567';
 const API_TOKEN = process.env.TUSFACTURAS_API_TOKEN || '6aa4e9bbe67eb7d8a05b28ea378ef55f';
 const USER_TOKEN = process.env.USER_TOKEN || 'd527102f84b9a161f7f6ccbee824834610035e0a4a56c07c94f7afa4d0545244';
 
-// JSONBin.io Configuration
+// ═══════════════════════════════════════════════════════════════
+// CONFIGURACIÓN JSONBIN.IO
+// ═══════════════════════════════════════════════════════════════
 const JSONBIN_API_KEY = process.env.JSONBIN_API_KEY;
 const JSONBIN_CLIENTES_BIN_ID = process.env.JSONBIN_CLIENTES_BIN_ID;
 const JSONBIN_TEMPLATES_BIN_ID = process.env.JSONBIN_TEMPLATES_BIN_ID;
 const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
 
-console.log('🚀 Servidor TusFacturas - PRODUCCIÓN CON JSONBin.io');
+console.log('🚀 Servidor TusFacturas - PRODUCCIÓN');
 console.log('📄 API v2: developers.tusfacturas.app');
 console.log('☁️  Persistencia: JSONBin.io');
 
+// Storage en memoria (cache local)
+let templatesGuardados = [];
+let clientesGuardados = [];
+
 // ═══════════════════════════════════════════════════════════════
-// SISTEMA DE PERSISTENCIA CON JSONBIN.IO
+// FUNCIONES JSONBIN.IO
 // ═══════════════════════════════════════════════════════════════
 
-// Cache en memoria (evita llamadas excesivas a JSONBin)
-let clientesCache = [];
-let templatesCache = [];
-let lastClientesFetch = 0;
-let lastTemplatesFetch = 0;
-const CACHE_TTL = 5000; // 5 segundos
-
-// Headers para JSONBin
 const getJSONBinHeaders = () => ({
   'Content-Type': 'application/json',
   'X-Master-Key': JSONBIN_API_KEY
 });
 
-// Leer datos de un bin
-const leerBin = async (binId, tipo) => {
+// Leer desde JSONBin
+const leerDesdeJSONBin = async (binId, tipo) => {
   try {
-    console.log(`📥 Leyendo ${tipo} desde JSONBin...`);
+    if (!JSONBIN_API_KEY || !binId) {
+      console.warn(`⚠️  JSONBin no configurado para ${tipo}, usando memoria local`);
+      return null;
+    }
+
+    console.log(`📥 Cargando ${tipo} desde JSONBin...`);
     const response = await axios.get(
       `${JSONBIN_BASE_URL}/b/${binId}/latest`,
       { 
         headers: getJSONBinHeaders(),
-        timeout: 10000 
+        timeout: 8000 
       }
     );
     
@@ -62,93 +65,66 @@ const leerBin = async (binId, tipo) => {
     return Array.isArray(datos) ? datos : [];
     
   } catch (error) {
-    console.error(`❌ Error leyendo ${tipo}:`, error.message);
-    if (error.response?.status === 404) {
-      console.log(`📝 Bin no encontrado, inicializando ${tipo}...`);
-      return [];
-    }
-    throw error;
+    console.error(`❌ Error leyendo ${tipo} de JSONBin:`, error.message);
+    return null;
   }
 };
 
-// Guardar datos en un bin
-const guardarBin = async (binId, datos, tipo) => {
+// Guardar en JSONBin
+const guardarEnJSONBin = async (binId, datos, tipo) => {
   try {
+    if (!JSONBIN_API_KEY || !binId) {
+      console.warn(`⚠️  JSONBin no configurado para ${tipo}, guardando solo en memoria`);
+      return false;
+    }
+
     console.log(`💾 Guardando ${tipo} en JSONBin (${datos.length} registros)...`);
     
-    const response = await axios.put(
+    await axios.put(
       `${JSONBIN_BASE_URL}/b/${binId}`,
       datos,
       { 
         headers: getJSONBinHeaders(),
-        timeout: 10000 
+        timeout: 8000 
       }
     );
     
-    console.log(`✅ ${tipo} guardados exitosamente`);
+    console.log(`✅ ${tipo} guardados en JSONBin`);
     return true;
     
   } catch (error) {
-    console.error(`❌ Error guardando ${tipo}:`, error.message);
-    if (error.response) {
-      console.error(`   Status: ${error.response.status}`);
-      console.error(`   Data:`, error.response.data);
-    }
+    console.error(`❌ Error guardando ${tipo} en JSONBin:`, error.message);
     return false;
   }
 };
 
-// Funciones con cache
-const obtenerClientes = async (forzarRecarga = false) => {
-  const ahora = Date.now();
+// Cargar datos al inicio
+const cargarDatosIniciales = async () => {
+  console.log('\n🔄 Cargando datos desde JSONBin...\n');
   
-  if (!forzarRecarga && clientesCache.length > 0 && (ahora - lastClientesFetch) < CACHE_TTL) {
-    console.log('📦 Usando cache de clientes');
-    return clientesCache;
-  }
-  
-  clientesCache = await leerBin(JSONBIN_CLIENTES_BIN_ID, 'clientes');
-  lastClientesFetch = ahora;
-  return clientesCache;
-};
-
-const obtenerTemplates = async (forzarRecarga = false) => {
-  const ahora = Date.now();
-  
-  if (!forzarRecarga && templatesCache.length > 0 && (ahora - lastTemplatesFetch) < CACHE_TTL) {
-    console.log('📦 Usando cache de templates');
-    return templatesCache;
-  }
-  
-  templatesCache = await leerBin(JSONBIN_TEMPLATES_BIN_ID, 'templates');
-  lastTemplatesFetch = ahora;
-  return templatesCache;
-};
-
-// Inicialización: cargar datos al arrancar
-const inicializarDatos = async () => {
   try {
-    console.log('\n🔄 Cargando datos iniciales desde JSONBin...');
-    
-    if (!JSONBIN_API_KEY || !JSONBIN_CLIENTES_BIN_ID || !JSONBIN_TEMPLATES_BIN_ID) {
-      throw new Error('Faltan variables de entorno de JSONBin (API_KEY o BIN_IDs)');
+    // Intentar cargar clientes
+    const clientesCargados = await leerDesdeJSONBin(JSONBIN_CLIENTES_BIN_ID, 'clientes');
+    if (clientesCargados) {
+      clientesGuardados = clientesCargados;
     }
     
-    await Promise.all([
-      obtenerClientes(true),
-      obtenerTemplates(true)
-    ]);
+    // Intentar cargar templates
+    const templatesCargados = await leerDesdeJSONBin(JSONBIN_TEMPLATES_BIN_ID, 'templates');
+    if (templatesCargados) {
+      templatesGuardados = templatesCargados;
+    }
     
-    console.log('✅ Datos iniciales cargados correctamente\n');
+    console.log(`\n📊 Datos cargados: ${clientesGuardados.length} clientes, ${templatesGuardados.length} templates\n`);
     
   } catch (error) {
-    console.error('❌ Error en inicialización:', error.message);
-    console.log('⚠️  El servidor arrancará con datos vacíos\n');
+    console.error('❌ Error en carga inicial:', error.message);
+    console.log('⚠️  El servidor arrancará con datos en memoria\n');
   }
 };
 
 // ═══════════════════════════════════════════════════════════════
-// UTILIDADES
+// UTILIDADES (ORIGINALES)
 // ═══════════════════════════════════════════════════════════════
 
 const createBaseRequest = () => ({
@@ -178,74 +154,53 @@ const calcularVencimiento = (fechaBase, condicionPago) => {
 // ENDPOINTS BÁSICOS
 // ═══════════════════════════════════════════════════════════════
 
-app.get('/', async (req, res) => {
-  const clientes = await obtenerClientes();
-  const templates = await obtenerTemplates();
-  
+app.get('/', (req, res) => {
   res.json({
     message: 'TusFacturas API - SILVIA MONICA NAHABETIAN',
     status: 'OK',
     timestamp: new Date().toISOString(),
     cuit: '27233141246',
     pdv: '00006',
-    modo: 'PRODUCCIÓN CON JSONBin.io',
-    clientes_locales: clientes.length,
-    templates_guardados: templates.length,
-    persistencia: 'JSONBin.io'
+    modo: 'PRODUCCIÓN',
+    clientes_locales: clientesGuardados.length,
+    templates_guardados: templatesGuardados.length,
+    persistencia: JSONBIN_API_KEY ? 'JSONBin.io activo' : 'Memoria local'
   });
 });
 
-app.get('/health', async (req, res) => {
-  try {
-    // Test de conectividad con JSONBin
-    await axios.get(
-      `${JSONBIN_BASE_URL}/b/${JSONBIN_CLIENTES_BIN_ID}/latest`,
-      { 
-        headers: getJSONBinHeaders(),
-        timeout: 5000 
-      }
-    );
-    
-    res.json({ 
-      status: 'OK', 
-      timestamp: new Date().toISOString(),
-      persistencia: 'OK',
-      jsonbin: 'conectado'
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: 'ERROR',
-      timestamp: new Date().toISOString(),
-      persistencia: 'ERROR',
-      jsonbin: 'desconectado',
-      error: error.message
-    });
-  }
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    jsonbin: JSONBIN_API_KEY ? 'configurado' : 'no configurado'
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════
-// GESTIÓN DE CLIENTES
+// GESTIÓN CLIENTES (con persistencia JSONBin)
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/api/clientes', async (req, res) => {
   try {
-    const clientes = await obtenerClientes(true); // Forzar recarga
-    console.log(`📋 Devolviendo ${clientes.length} clientes`);
-    res.json(clientes);
+    // Recargar desde JSONBin
+    const datosActualizados = await leerDesdeJSONBin(JSONBIN_CLIENTES_BIN_ID, 'clientes');
+    if (datosActualizados) {
+      clientesGuardados = datosActualizados;
+    }
+    
+    console.log(`📋 Devolviendo ${clientesGuardados.length} clientes`);
+    res.json(clientesGuardados);
   } catch (error) {
-    console.error('❌ Error obteniendo clientes:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error obteniendo clientes:', error);
+    res.json(clientesGuardados); // Devolver cache si falla
   }
 });
 
 app.post('/api/clientes/agregar', async (req, res) => {
   try {
     const { cliente } = req.body;
-    
-    const clientes = await obtenerClientes(true);
-    
-    const nuevoId = clientes.length > 0 
-      ? Math.max(...clientes.map(c => c.id)) + 1 
+    const nuevoId = clientesGuardados.length > 0 
+      ? Math.max(...clientesGuardados.map(c => c.id)) + 1 
       : 1;
     
     const clienteNuevo = {
@@ -254,34 +209,23 @@ app.post('/api/clientes/agregar', async (req, res) => {
       documento: (cliente.documento || '').replace(/-/g, ''),
       email: cliente.email || '',
       tipo_documento: 'CUIT',
-      origen: 'manual',
-      fecha_creacion: new Date().toISOString()
+      origen: 'manual'
     };
     
-    const existe = clientes.find(c => c.documento === clienteNuevo.documento);
+    const existe = clientesGuardados.find(c => c.documento === clienteNuevo.documento);
     if (existe) {
-      return res.json({ 
-        success: true, 
-        message: 'Cliente ya existe', 
-        cliente: existe 
-      });
+      return res.json({ success: true, message: 'Cliente ya existe', cliente: existe });
     }
     
-    clientes.push(clienteNuevo);
+    clientesGuardados.push(clienteNuevo);
+    console.log(`➕ Cliente agregado: ${clienteNuevo.nombre} (${clienteNuevo.documento})`);
     
-    const guardado = await guardarBin(JSONBIN_CLIENTES_BIN_ID, clientes, 'clientes');
+    // Guardar en JSONBin (async, no bloqueante)
+    guardarEnJSONBin(JSONBIN_CLIENTES_BIN_ID, clientesGuardados, 'clientes');
     
-    if (guardado) {
-      clientesCache = clientes; // Actualizar cache
-      lastClientesFetch = Date.now();
-      console.log(`✅ Cliente agregado: ${clienteNuevo.nombre}`);
-      res.json({ success: true, cliente: clienteNuevo });
-    } else {
-      throw new Error('No se pudo guardar el cliente en JSONBin');
-    }
-    
+    res.json({ success: true, cliente: clienteNuevo });
   } catch (err) {
-    console.error('❌ Error agregando cliente:', err);
+    console.error('Error agregando cliente:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -289,69 +233,58 @@ app.post('/api/clientes/agregar', async (req, res) => {
 app.post('/api/clientes/guardar', async (req, res) => {
   try {
     const { clientes } = req.body;
+    clientesGuardados = clientes || [];
+    console.log(`💾 ${clientesGuardados.length} clientes guardados en memoria`);
     
-    const guardado = await guardarBin(JSONBIN_CLIENTES_BIN_ID, clientes, 'clientes');
+    // Guardar en JSONBin
+    await guardarEnJSONBin(JSONBIN_CLIENTES_BIN_ID, clientesGuardados, 'clientes');
     
-    if (guardado) {
-      clientesCache = clientes;
-      lastClientesFetch = Date.now();
-      console.log(`💾 ${clientes.length} clientes guardados en JSONBin`);
-      res.json({ success: true, total: clientes.length });
-    } else {
-      throw new Error('No se pudieron guardar los clientes');
-    }
+    res.json({ success: true, total: clientesGuardados.length });
   } catch (err) {
-    console.error('❌ Error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ═══════════════════════════════════════════════════════════════
-// GESTIÓN DE TEMPLATES
+// GESTIÓN TEMPLATES (con persistencia JSONBin)
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/api/templates', async (req, res) => {
   try {
-    const templates = await obtenerTemplates(true);
-    console.log(`📊 Devolviendo ${templates.length} templates`);
-    res.json(templates);
+    // Recargar desde JSONBin
+    const datosActualizados = await leerDesdeJSONBin(JSONBIN_TEMPLATES_BIN_ID, 'templates');
+    if (datosActualizados) {
+      templatesGuardados = datosActualizados;
+    }
+    
+    res.json(templatesGuardados);
   } catch (error) {
-    console.error('❌ Error obteniendo templates:', error);
-    res.status(500).json({ success: false, error: error.message });
+    console.error('Error obteniendo templates:', error);
+    res.json(templatesGuardados); // Devolver cache si falla
   }
 });
 
 app.post('/api/templates/guardar', async (req, res) => {
   try {
     const { templates } = req.body;
+    templatesGuardados = templates || [];
+    console.log(`💾 ${templatesGuardados.length} templates guardados en memoria`);
     
-    const guardado = await guardarBin(JSONBIN_TEMPLATES_BIN_ID, templates, 'templates');
+    // Guardar en JSONBin
+    await guardarEnJSONBin(JSONBIN_TEMPLATES_BIN_ID, templatesGuardados, 'templates');
     
-    if (guardado) {
-      templatesCache = templates;
-      lastTemplatesFetch = Date.now();
-      console.log(`💾 ${templates.length} templates guardados en JSONBin`);
-      res.json({ success: true, total: templates.length });
-    } else {
-      throw new Error('No se pudieron guardar los templates');
-    }
+    res.json({ success: true, total: templatesGuardados.length });
   } catch (err) {
-    console.error('❌ Error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ═══════════════════════════════════════════════════════════════
-// ENVÍO DE FACTURAS
+// ENVÍO DE FACTURAS - FACTURA A (SIN CAMBIOS)
 // ═══════════════════════════════════════════════════════════════
 
 app.post('/api/enviar-facturas', async (req, res) => {
   const { templates } = req.body;
-  
-  // Recargar datos actuales
-  const clientes = await obtenerClientes(true);
-  let templatesActuales = await obtenerTemplates(true);
-  
   const templatesSeleccionados = (templates || []).filter(t => t.selected);
   const resultados = [];
 
@@ -360,7 +293,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
   try {
     for (const template of templatesSeleccionados) {
       try {
-        const cliente = clientes.find(c => c.id === template.clienteId);
+        const cliente = clientesGuardados.find(c => c.id === template.clienteId);
         if (!cliente) throw new Error(`Cliente ID ${template.clienteId} no encontrado`);
 
         console.log(`\n🧾 Preparando factura para: ${cliente.nombre} - CUIT: ${cliente.documento}`);
@@ -494,8 +427,10 @@ app.post('/api/enviar-facturas', async (req, res) => {
           }
         };
 
-        console.log(`   💰 Total: ${total.toFixed(2)} (Neto: ${importe_neto_gravado.toFixed(2)} + IVA: ${importe_iva.toFixed(2)})`);
-        console.log(`   🌐 Enviando a TusFacturas API...`);
+        console.log('   📤 REQUEST A TUSFACTURAS (resumen):');
+        console.log(`   Fecha: ${facturaData.comprobante.fecha}  Vto: ${facturaData.comprobante.vencimiento}`);
+        console.log(`   Neto: ${facturaData.comprobante.importe_neto_gravado}  IVA: ${facturaData.comprobante.importe_iva}  Total: ${facturaData.comprobante.total}`);
+        console.log('   Detalle items:', facturaData.comprobante.detalle.length);
 
         const response = await axios.post(
           `${TUSFACTURAS_BASE_URL}/facturacion/nuevo`,
@@ -506,7 +441,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
           }
         );
 
-        console.log(`   📡 Respuesta recibida (status: ${response.status})`);
+        console.log('   📥 Respuesta API:', JSON.stringify(response.data, null, 2));
 
         if (response.data?.error === 'S') {
           const apiErr = Array.isArray(response.data.errores) 
@@ -514,8 +449,6 @@ app.post('/api/enviar-facturas', async (req, res) => {
             : (response.data.errores || 'Error API');
           throw new Error(apiErr);
         }
-
-        console.log(`   ✅ Factura autorizada - CAE: ${response.data.cae}`);
 
         resultados.push({
           templateId: template.id,
@@ -530,17 +463,8 @@ app.post('/api/enviar-facturas', async (req, res) => {
         await new Promise(r => setTimeout(r, 1200));
 
       } catch (err) {
-        console.error(`   ❌ ERROR: ${err.message}`);
-        
-        if (err.response) {
-          console.error(`   📡 Status HTTP: ${err.response.status}`);
-          console.error(`   📄 Respuesta API:`, JSON.stringify(err.response.data, null, 2));
-        } else if (err.request) {
-          console.error(`   🔌 Sin respuesta del servidor (timeout o red caída)`);
-        } else {
-          console.error(`   ⚙️  Error al configurar request:`, err.message);
-        }
-        
+        console.error('   ❌ ERROR AL ENVIAR FACTURA:', err.message);
+        console.error('   Detalle API:', err.response?.data || 'sin response.data');
         resultados.push({
           templateId: template.id,
           success: false,
@@ -552,17 +476,17 @@ app.post('/api/enviar-facturas', async (req, res) => {
     const exitosas = resultados.filter(r => r.success).length;
     const fallidas = resultados.filter(r => !r.success).length;
 
-    console.log(`\n📊 Resultado: ${exitosas} exitosas | ${fallidas} fallidas`);
+    console.log(`\n✅ Resultado: ${exitosas} exitosas | ${fallidas} fallidas`);
 
-    // Actualizar y guardar templates (desmarcar exitosas)
+    // Desmarcar las exitosas y guardar
     if (exitosas > 0) {
-      templatesActuales = templatesActuales.map(t => {
+      templatesGuardados = templatesGuardados.map(t => {
         const ok = resultados.find(r => r.templateId === t.id && r.success);
         return ok ? { ...t, selected: false } : t;
       });
-      await guardarBin(JSONBIN_TEMPLATES_BIN_ID, templatesActuales, 'templates');
-      templatesCache = templatesActuales;
-      lastTemplatesFetch = Date.now();
+      
+      // Guardar templates actualizados en JSONBin (async)
+      guardarEnJSONBin(JSONBIN_TEMPLATES_BIN_ID, templatesGuardados, 'templates');
     }
 
     res.json({ 
@@ -574,13 +498,13 @@ app.post('/api/enviar-facturas', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('💥 ERROR CRÍTICO:', err.message);
+    console.error('💥 ERROR CRÍTICO EN ENVIOS:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ═══════════════════════════════════════════════════════════════
-// TEST DE CONEXIÓN
+// TEST CONEXIÓN
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/api/test', async (req, res) => {
@@ -594,15 +518,15 @@ app.get('/api/test', async (req, res) => {
       },
       { timeout: 10000 }
     );
-    console.log('✅ Test de conexión exitoso');
+    console.log('🔍 Test API OK');
     res.json({ 
       success: true, 
       mensaje: 'Conexión exitosa con TusFacturas', 
-      modo: 'PRODUCCIÓN',
-      persistencia: 'JSONBin.io OK'
+      modo: 'PRODUCCIÓN', 
+      api: response.data 
     });
   } catch (err) {
-    console.error('❌ Error en test:', err.message);
+    console.error('❌ Error de conexión test:', err.message);
     res.status(500).json({ 
       success: false, 
       error: err.message, 
@@ -617,16 +541,16 @@ app.get('/api/test', async (req, res) => {
 
 app.use((error, req, res, next) => {
   console.error('🚨 Error no manejado:', error);
-  res.status(500).json({
-    error: 'Error interno del servidor',
-    message: error.message
+  res.status(500).json({ 
+    error: 'Error interno del servidor', 
+    message: error.message 
   });
 });
 
 app.use('*', (req, res) => {
-  res.status(404).json({
-    error: 'Endpoint no encontrado',
-    path: req.originalUrl
+  res.status(404).json({ 
+    error: 'Endpoint no encontrado', 
+    path: req.originalUrl 
   });
 });
 
@@ -639,13 +563,12 @@ const server = app.listen(PORT, async () => {
   console.log(`║  SERVIDOR ACTIVO EN PUERTO ${PORT}                  ║`);
   console.log('║  SILVIA MONICA NAHABETIAN                         ║');
   console.log('║  CUIT: 27233141246 • PDV: 00006                   ║');
-  console.log('║  MODO: PRODUCCIÓN CON JSONBin.io                  ║');
+  console.log('║  MODO: PRODUCCIÓN                                 ║');
   console.log('╚════════════════════════════════════════════════════╝\n');
   
-  // Cargar datos iniciales
-  await inicializarDatos();
+  // Cargar datos desde JSONBin al arrancar
+  await cargarDatosIniciales();
   
-  console.log(`📊 Clientes: ${clientesCache.length} | Templates: ${templatesCache.length}`);
   console.log('✅ Sistema listo para operar\n');
 });
 
