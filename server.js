@@ -402,19 +402,15 @@ app.post('/api/enviar-facturas', async (req, res) => {
           throw new Error('El total calculado es 0. Revise precios/cantidades del template.');
         }
 
-        // ✅ CAMBIO PRINCIPAL: Sin campo 'email', con envia_por_mail='S'
+        // ✅ CAMBIO PRINCIPAL: Enviar SOLO lo mínimo para no pisar datos existentes
         const facturaData = {
           ...createBaseRequest(),
           cliente: {
             documento_tipo: 'CUIT',
             documento_nro: cliente.documento,
-            razon_social: cliente.nombre,
-            // ❌ NO enviamos 'email' - TusFacturas usa el que ya tiene
-            domicilio: cliente.domicilio || 'Ciudad Autónoma de Buenos Aires',
-            provincia: cliente.provincia || '1',
-            envia_por_mail: 'S', // ✅ Siempre 'S' - TusFacturas decide si tiene email
-            condicion_iva: 'RI',
-            condicion_pago: condicionPago
+            envia_por_mail: 'S'
+            // ❌ NO enviamos: email, razon_social, domicilio, provincia, condicion_iva
+            // ✅ TusFacturas usa TODA la info que ya tiene del cliente
           },
           comprobante: {
             fecha: formatDate(fechaHoy),
@@ -443,9 +439,9 @@ app.post('/api/enviar-facturas', async (req, res) => {
         };
 
         console.log('   📤 REQUEST A TUSFACTURAS (resumen):');
-        console.log(`   Cliente: ${facturaData.cliente.razon_social}`);
-        console.log(`   CUIT: ${facturaData.cliente.documento_nro}`);
-        console.log(`   Envía email: ${facturaData.cliente.envia_por_mail} (TusFacturas gestiona destino)`);
+        console.log(`   Cliente CUIT: ${facturaData.cliente.documento_nro}`);
+        console.log(`   ⚠️  Enviando SOLO CUIT - TusFacturas usa sus datos (nombre, email, domicilio, etc.)`);
+        console.log(`   Envía email: ${facturaData.cliente.envia_por_mail} (si el cliente tiene email en TusFacturas)`);
         console.log(`   Fecha: ${facturaData.comprobante.fecha}  Vto: ${facturaData.comprobante.vencimiento}`);
         console.log(`   Total: ${facturaData.comprobante.total}`);
 
