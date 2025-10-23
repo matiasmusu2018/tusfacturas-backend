@@ -402,15 +402,20 @@ app.post('/api/enviar-facturas', async (req, res) => {
           throw new Error('El total calculado es 0. Revise precios/cantidades del template.');
         }
 
-        // ✅ CAMBIO PRINCIPAL: Enviar SOLO lo mínimo para no pisar datos existentes
+        // ✅ ENVIAR SOLO LOS CAMPOS MÍNIMOS OBLIGATORIOS
+        // Si el cliente existe, TusFacturas usa sus datos guardados (email, etc.)
+        // Si NO enviamos 'email', TusFacturas NO lo sobrescribe
         const facturaData = {
           ...createBaseRequest(),
           cliente: {
             documento_tipo: 'CUIT',
             documento_nro: cliente.documento,
-            envia_por_mail: 'S'
-            // ❌ NO enviamos: email, razon_social, domicilio, provincia, condicion_iva
-            // ✅ TusFacturas usa TODA la info que ya tiene del cliente
+            razon_social: cliente.nombre,
+            // ❌ NO enviar 'email' - TusFacturas mantiene el que tiene
+            domicilio: 'Sin especificar',  // Mínimo requerido por API
+            provincia: '1',                 // Mínimo requerido por API (CABA)
+            envia_por_mail: 'S',           // TusFacturas decide según tenga email
+            condicion_iva: 'RI'            // Requerido para Factura A
           },
           comprobante: {
             fecha: formatDate(fechaHoy),
@@ -439,9 +444,10 @@ app.post('/api/enviar-facturas', async (req, res) => {
         };
 
         console.log('   📤 REQUEST A TUSFACTURAS (resumen):');
-        console.log(`   Cliente CUIT: ${facturaData.cliente.documento_nro}`);
-        console.log(`   ⚠️  Enviando SOLO CUIT - TusFacturas usa sus datos (nombre, email, domicilio, etc.)`);
-        console.log(`   Envía email: ${facturaData.cliente.envia_por_mail} (si el cliente tiene email en TusFacturas)`);
+        console.log(`   Cliente: ${facturaData.cliente.razon_social}`);
+        console.log(`   CUIT: ${facturaData.cliente.documento_nro}`);
+        console.log(`   ⚠️  SIN CAMPO EMAIL - TusFacturas mantiene el email que tiene guardado`);
+        console.log(`   Envía email: ${facturaData.cliente.envia_por_mail}`);
         console.log(`   Fecha: ${facturaData.comprobante.fecha}  Vto: ${facturaData.comprobante.vencimiento}`);
         console.log(`   Total: ${facturaData.comprobante.total}`);
 
