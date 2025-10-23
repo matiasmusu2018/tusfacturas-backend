@@ -1,4 +1,4 @@
-// server.js - VERSIÓN ESTABLE + JSONBin.io
+// server.js - SIN GESTIÓN DE EMAILS (TusFacturas maneja todo)
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -29,13 +29,14 @@ const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
 console.log('🚀 Servidor TusFacturas - PRODUCCIÓN');
 console.log('📄 API v2: developers.tusfacturas.app');
 console.log('☁️  Persistencia: JSONBin.io');
+console.log('📧 Emails: Gestionados por TusFacturas');
 
 // Storage en memoria (cache local)
 let templatesGuardados = [];
 let clientesGuardados = [];
 
 // ═══════════════════════════════════════════════════════════════
-// FUNCIONES JSONBIN.IO
+// FUNCIONES JSONBIN.IO (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 
 const getJSONBinHeaders = () => ({
@@ -43,7 +44,6 @@ const getJSONBinHeaders = () => ({
   'X-Master-Key': JSONBIN_API_KEY
 });
 
-// Leer desde JSONBin
 const leerDesdeJSONBin = async (binId, tipo) => {
   try {
     if (!JSONBIN_API_KEY || !binId) {
@@ -62,13 +62,11 @@ const leerDesdeJSONBin = async (binId, tipo) => {
     
     const datos = response.data.record;
     
-    // Validar que sea array
     if (!Array.isArray(datos)) {
       console.warn(`⚠️  Datos de ${tipo} no son array, inicializando vacío`);
       return [];
     }
     
-    // Validar estructura de templates
     if (tipo === 'templates' && datos.length > 0) {
       datos.forEach((t, idx) => {
         if (typeof t.monto === 'undefined') {
@@ -90,7 +88,6 @@ const leerDesdeJSONBin = async (binId, tipo) => {
   }
 };
 
-// Guardar en JSONBin
 const guardarEnJSONBin = async (binId, datos, tipo) => {
   try {
     if (!JSONBIN_API_KEY || !binId) {
@@ -118,18 +115,15 @@ const guardarEnJSONBin = async (binId, datos, tipo) => {
   }
 };
 
-// Cargar datos al inicio
 const cargarDatosIniciales = async () => {
   console.log('\n🔄 Cargando datos desde JSONBin...\n');
   
   try {
-    // Intentar cargar clientes
     const clientesCargados = await leerDesdeJSONBin(JSONBIN_CLIENTES_BIN_ID, 'clientes');
     if (clientesCargados) {
       clientesGuardados = clientesCargados;
     }
     
-    // Intentar cargar templates
     const templatesCargados = await leerDesdeJSONBin(JSONBIN_TEMPLATES_BIN_ID, 'templates');
     if (templatesCargados) {
       templatesGuardados = templatesCargados;
@@ -144,7 +138,7 @@ const cargarDatosIniciales = async () => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// UTILIDADES (ORIGINALES)
+// UTILIDADES
 // ═══════════════════════════════════════════════════════════════
 
 const createBaseRequest = () => ({
@@ -184,7 +178,8 @@ app.get('/', (req, res) => {
     modo: 'PRODUCCIÓN',
     clientes_locales: clientesGuardados.length,
     templates_guardados: templatesGuardados.length,
-    persistencia: JSONBIN_API_KEY ? 'JSONBin.io activo' : 'Memoria local'
+    persistencia: JSONBIN_API_KEY ? 'JSONBin.io activo' : 'Memoria local',
+    gestion_emails: 'TusFacturas (automático)'
   });
 });
 
@@ -197,25 +192,21 @@ app.get('/health', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// GESTIÓN CLIENTES (con persistencia JSONBin)
+// GESTIÓN CLIENTES - SIN CAMPO EMAIL
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/api/clientes', async (req, res) => {
   try {
-    // Recargar desde JSONBin
     const datosActualizados = await leerDesdeJSONBin(JSONBIN_CLIENTES_BIN_ID, 'clientes');
     if (datosActualizados && Array.isArray(datosActualizados)) {
       clientesGuardados = datosActualizados;
     }
     
     console.log(`📋 Devolviendo ${clientesGuardados.length} clientes`);
-    console.log('   Estructura:', clientesGuardados.length > 0 ? Object.keys(clientesGuardados[0]) : 'sin datos');
-    
-    // SIEMPRE devolver un array
     res.json(Array.isArray(clientesGuardados) ? clientesGuardados : []);
   } catch (error) {
     console.error('Error obteniendo clientes:', error);
-    res.json([]); // Array vacío si hay error
+    res.json([]);
   }
 });
 
@@ -226,13 +217,14 @@ app.post('/api/clientes/agregar', async (req, res) => {
       ? Math.max(...clientesGuardados.map(c => c.id)) + 1 
       : 1;
     
+    // ✅ YA NO GUARDAMOS EMAIL - TusFacturas lo maneja
     const clienteNuevo = {
       id: nuevoId,
       nombre: cliente.nombre,
       documento: (cliente.documento || '').replace(/-/g, ''),
-      email: cliente.email || '',
       tipo_documento: 'CUIT',
       origen: 'manual'
+      // ❌ NO incluimos 'email'
     };
     
     const existe = clientesGuardados.find(c => c.documento === clienteNuevo.documento);
@@ -242,8 +234,8 @@ app.post('/api/clientes/agregar', async (req, res) => {
     
     clientesGuardados.push(clienteNuevo);
     console.log(`➕ Cliente agregado: ${clienteNuevo.nombre} (${clienteNuevo.documento})`);
+    console.log(`   📧 Email: Gestionado por TusFacturas`);
     
-    // Guardar en JSONBin (async, no bloqueante)
     guardarEnJSONBin(JSONBIN_CLIENTES_BIN_ID, clientesGuardados, 'clientes');
     
     res.json({ success: true, cliente: clienteNuevo });
@@ -259,7 +251,6 @@ app.post('/api/clientes/guardar', async (req, res) => {
     clientesGuardados = clientes || [];
     console.log(`💾 ${clientesGuardados.length} clientes guardados en memoria`);
     
-    // Guardar en JSONBin
     await guardarEnJSONBin(JSONBIN_CLIENTES_BIN_ID, clientesGuardados, 'clientes');
     
     res.json({ success: true, total: clientesGuardados.length });
@@ -269,25 +260,21 @@ app.post('/api/clientes/guardar', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// GESTIÓN TEMPLATES (con persistencia JSONBin)
+// GESTIÓN TEMPLATES (sin cambios)
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/api/templates', async (req, res) => {
   try {
-    // Recargar desde JSONBin
     const datosActualizados = await leerDesdeJSONBin(JSONBIN_TEMPLATES_BIN_ID, 'templates');
     if (datosActualizados && Array.isArray(datosActualizados)) {
       templatesGuardados = datosActualizados;
     }
     
     console.log(`📊 Devolviendo ${templatesGuardados.length} templates`);
-    console.log('   Estructura:', templatesGuardados.length > 0 ? Object.keys(templatesGuardados[0]) : 'sin datos');
-    
-    // SIEMPRE devolver un array
     res.json(Array.isArray(templatesGuardados) ? templatesGuardados : []);
   } catch (error) {
     console.error('Error obteniendo templates:', error);
-    res.json([]); // Array vacío si hay error
+    res.json([]);
   }
 });
 
@@ -297,7 +284,6 @@ app.post('/api/templates/guardar', async (req, res) => {
     templatesGuardados = templates || [];
     console.log(`💾 ${templatesGuardados.length} templates guardados en memoria`);
     
-    // Guardar en JSONBin
     await guardarEnJSONBin(JSONBIN_TEMPLATES_BIN_ID, templatesGuardados, 'templates');
     
     res.json({ success: true, total: templatesGuardados.length });
@@ -307,7 +293,7 @@ app.post('/api/templates/guardar', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// ENVÍO DE FACTURAS - FACTURA A (SIN CAMBIOS)
+// ENVÍO DE FACTURAS - SIN ENVIAR EMAIL EN LA REQUEST
 // ═══════════════════════════════════════════════════════════════
 
 app.post('/api/enviar-facturas', async (req, res) => {
@@ -316,6 +302,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
   const resultados = [];
 
   console.log(`\n🚀 Enviando ${templatesSeleccionados.length} facturas (Factura A)`);
+  console.log(`📧 Emails: TusFacturas enviará automáticamente si el cliente tiene email`);
 
   try {
     for (const template of templatesSeleccionados) {
@@ -415,16 +402,17 @@ app.post('/api/enviar-facturas', async (req, res) => {
           throw new Error('El total calculado es 0. Revise precios/cantidades del template.');
         }
 
+        // ✅ CAMBIO PRINCIPAL: Sin campo 'email', con envia_por_mail='S'
         const facturaData = {
           ...createBaseRequest(),
           cliente: {
             documento_tipo: 'CUIT',
             documento_nro: cliente.documento,
             razon_social: cliente.nombre,
-            email: cliente.email || '',
+            // ❌ NO enviamos 'email' - TusFacturas usa el que ya tiene
             domicilio: cliente.domicilio || 'Ciudad Autónoma de Buenos Aires',
             provincia: cliente.provincia || '1',
-            envia_por_mail: cliente.email ? 'S' : 'N',
+            envia_por_mail: 'S', // ✅ Siempre 'S' - TusFacturas decide si tiene email
             condicion_iva: 'RI',
             condicion_pago: condicionPago
           },
@@ -455,9 +443,11 @@ app.post('/api/enviar-facturas', async (req, res) => {
         };
 
         console.log('   📤 REQUEST A TUSFACTURAS (resumen):');
+        console.log(`   Cliente: ${facturaData.cliente.razon_social}`);
+        console.log(`   CUIT: ${facturaData.cliente.documento_nro}`);
+        console.log(`   Envía email: ${facturaData.cliente.envia_por_mail} (TusFacturas gestiona destino)`);
         console.log(`   Fecha: ${facturaData.comprobante.fecha}  Vto: ${facturaData.comprobante.vencimiento}`);
-        console.log(`   Neto: ${facturaData.comprobante.importe_neto_gravado}  IVA: ${facturaData.comprobante.importe_iva}  Total: ${facturaData.comprobante.total}`);
-        console.log('   Detalle items:', facturaData.comprobante.detalle.length);
+        console.log(`   Total: ${facturaData.comprobante.total}`);
 
         const response = await axios.post(
           `${TUSFACTURAS_BASE_URL}/facturacion/nuevo`,
@@ -505,14 +495,12 @@ app.post('/api/enviar-facturas', async (req, res) => {
 
     console.log(`\n✅ Resultado: ${exitosas} exitosas | ${fallidas} fallidas`);
 
-    // Desmarcar las exitosas y guardar
     if (exitosas > 0) {
       templatesGuardados = templatesGuardados.map(t => {
         const ok = resultados.find(r => r.templateId === t.id && r.success);
         return ok ? { ...t, selected: false } : t;
       });
       
-      // Guardar templates actualizados en JSONBin (async)
       guardarEnJSONBin(JSONBIN_TEMPLATES_BIN_ID, templatesGuardados, 'templates');
     }
 
@@ -591,9 +579,9 @@ const server = app.listen(PORT, async () => {
   console.log('║  SILVIA MONICA NAHABETIAN                         ║');
   console.log('║  CUIT: 27233141246 • PDV: 00006                   ║');
   console.log('║  MODO: PRODUCCIÓN                                 ║');
+  console.log('║  📧 Emails: TusFacturas (automático)              ║');
   console.log('╚════════════════════════════════════════════════════╝\n');
   
-  // Cargar datos desde JSONBin al arrancar
   await cargarDatosIniciales();
   
   console.log('✅ Sistema listo para operar\n');
