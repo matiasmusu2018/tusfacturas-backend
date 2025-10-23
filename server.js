@@ -1,4 +1,4 @@
-// server.js - CON CONSULTA PREVIA DE CLIENTES (Opción B)
+// server.js - CON GESTIÓN DE EMAILS (Opción A - Solución definitiva)
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -26,7 +26,7 @@ const JSONBIN_BASE_URL = 'https://api.jsonbin.io/v3';
 console.log('🚀 Servidor TusFacturas - PRODUCCIÓN');
 console.log('📄 API v2: developers.tusfacturas.app');
 console.log('☁️  Persistencia: JSONBin.io');
-console.log('🔍 Emails: Consulta previa + mantiene datos originales');
+console.log('📧 Emails: Gestionados en JSONBin + enviados a TusFacturas');
 
 let templatesGuardados = [];
 let clientesGuardados = [];
@@ -161,57 +161,6 @@ const calcularVencimiento = (fechaBase, condicionPago) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// 🆕 FUNCIÓN PARA CONSULTAR CLIENTE EN TUSFACTURAS
-// ═══════════════════════════════════════════════════════════════
-
-const consultarClienteEnTusFacturas = async (cuit) => {
-  try {
-    console.log(`   🔍 Consultando cliente CUIT ${cuit} en TusFacturas...`);
-    
-    const response = await axios.post(
-      `${TUSFACTURAS_BASE_URL}/clientes/buscar`,
-      {
-        ...createBaseRequest(),
-        cuit: cuit
-      },
-      { timeout: 10000 }
-    );
-
-    if (response.data && response.data.length > 0) {
-      const clienteData = response.data[0];
-      console.log(`   ✅ Cliente encontrado en TusFacturas:`);
-      console.log(`      - Nombre: ${clienteData.razon_social}`);
-      console.log(`      - Email: ${clienteData.email || '(sin email)'}`);
-      console.log(`      - Condición IVA: ${clienteData.condicion_iva}`);
-      console.log(`      - Domicilio: ${clienteData.domicilio}`);
-      
-      return {
-        existe: true,
-        datos: {
-          documento_tipo: 'CUIT',
-          documento_nro: cuit,
-          razon_social: clienteData.razon_social,
-          email: clienteData.email || '',
-          domicilio: clienteData.domicilio || 'Sin especificar',
-          provincia: clienteData.provincia || '1',
-          envia_por_mail: clienteData.email ? 'S' : 'N',
-          condicion_iva: clienteData.condicion_iva || 'RI',
-          condicion_pago: clienteData.condicion_pago || '0'
-        }
-      };
-    } else {
-      console.log(`   ⚠️  Cliente NO encontrado en TusFacturas - se creará nuevo`);
-      return { existe: false };
-    }
-    
-  } catch (error) {
-    console.error(`   ❌ Error consultando cliente:`, error.message);
-    // Si falla la consulta, continuamos con datos mínimos
-    return { existe: false };
-  }
-};
-
-// ═══════════════════════════════════════════════════════════════
 // ENDPOINTS BÁSICOS
 // ═══════════════════════════════════════════════════════════════
 
@@ -226,7 +175,7 @@ app.get('/', (req, res) => {
     clientes_locales: clientesGuardados.length,
     templates_guardados: templatesGuardados.length,
     persistencia: JSONBIN_API_KEY ? 'JSONBin.io activo' : 'Memoria local',
-    gestion_emails: 'Consulta previa + mantiene datos originales'
+    gestion_emails: 'JSONBin (app gestiona emails)'
   });
 });
 
@@ -239,7 +188,7 @@ app.get('/health', (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// GESTIÓN CLIENTES
+// GESTIÓN CLIENTES - CON CAMPO EMAIL
 // ═══════════════════════════════════════════════════════════════
 
 app.get('/api/clientes', async (req, res) => {
@@ -264,10 +213,12 @@ app.post('/api/clientes/agregar', async (req, res) => {
       ? Math.max(...clientesGuardados.map(c => c.id)) + 1 
       : 1;
     
+    // ✅ AHORA GUARDAMOS EL EMAIL
     const clienteNuevo = {
       id: nuevoId,
       nombre: cliente.nombre,
       documento: (cliente.documento || '').replace(/-/g, ''),
+      email: cliente.email || '',  // ✅ Email incluido
       tipo_documento: 'CUIT',
       origen: 'manual'
     };
@@ -279,7 +230,7 @@ app.post('/api/clientes/agregar', async (req, res) => {
     
     clientesGuardados.push(clienteNuevo);
     console.log(`➕ Cliente agregado: ${clienteNuevo.nombre} (${clienteNuevo.documento})`);
-    console.log(`   📧 Email: Gestionado por TusFacturas`);
+    console.log(`   📧 Email: ${clienteNuevo.email || '(sin email)'}`);
     
     guardarEnJSONBin(JSONBIN_CLIENTES_BIN_ID, clientesGuardados, 'clientes');
     
@@ -338,7 +289,7 @@ app.post('/api/templates/guardar', async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════
-// ENVÍO DE FACTURAS - CON CONSULTA PREVIA
+// ENVÍO DE FACTURAS - ENVIANDO EMAIL GUARDADO
 // ═══════════════════════════════════════════════════════════════
 
 app.post('/api/enviar-facturas', async (req, res) => {
@@ -347,7 +298,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
   const resultados = [];
 
   console.log(`\n🚀 Enviando ${templatesSeleccionados.length} facturas (Factura A)`);
-  console.log(`🔍 Modo: Consulta previa de clientes + envío con datos completos`);
+  console.log(`📧 Emails: Se envían desde JSONBin → TusFacturas los mantiene`);
 
   try {
     for (const template of templatesSeleccionados) {
@@ -357,37 +308,11 @@ app.post('/api/enviar-facturas', async (req, res) => {
 
         console.log(`\n🧾 Preparando factura para: ${cliente.nombre} - CUIT: ${cliente.documento}`);
 
-        // ✅ PASO 1: CONSULTAR CLIENTE EN TUSFACTURAS
-        const clienteConsultado = await consultarClienteEnTusFacturas(cliente.documento);
-        
-        // Determinar qué datos usar
-        let datosCliente;
-        if (clienteConsultado.existe) {
-          // ✅ Usar datos reales de TusFacturas (pisa con lo mismo = no modifica)
-          datosCliente = clienteConsultado.datos;
-          console.log(`   💡 Usando datos existentes de TusFacturas (mantiene email y config)`);
-        } else {
-          // ⚠️ Cliente nuevo - usar datos mínimos
-          datosCliente = {
-            documento_tipo: 'CUIT',
-            documento_nro: cliente.documento,
-            razon_social: cliente.nombre,
-            email: '',
-            domicilio: 'Sin especificar',
-            provincia: '1',
-            envia_por_mail: 'N',
-            condicion_iva: 'RI',
-            condicion_pago: '0'
-          };
-          console.log(`   💡 Cliente nuevo - se creará con datos mínimos (sin email)`);
-        }
-
-        // Continuar con la lógica de facturación...
         const cantidadItem = Number(template.cantidad || 1);
         const precioUnitarioSinIva = Number(template.monto || template.precio || 0);
         const alicuota = Number(template.alicuota ?? 21);
         const bonificacionPorcentaje = Number(template.bonificacion_porcentaje ?? 0);
-        const condicionPago = String(template.condicion_pago ?? datosCliente.condicion_pago ?? '0');
+        const condicionPago = String(template.condicion_pago ?? cliente.condicion_pago ?? '0');
         const percepciones = Array.isArray(template.percepciones) ? template.percepciones : [];
 
         const fechaHoy = new Date();
@@ -473,10 +398,20 @@ app.post('/api/enviar-facturas', async (req, res) => {
           throw new Error('El total calculado es 0. Revise precios/cantidades del template.');
         }
 
-        // ✅ PASO 2: ENVIAR FACTURA CON DATOS COMPLETOS
+        // ✅ ENVIAR TODOS LOS DATOS DEL CLIENTE INCLUYENDO EMAIL
         const facturaData = {
           ...createBaseRequest(),
-          cliente: datosCliente,  // Usa los datos consultados (o mínimos si es nuevo)
+          cliente: {
+            documento_tipo: 'CUIT',
+            documento_nro: cliente.documento,
+            razon_social: cliente.nombre,
+            email: cliente.email || '',  // ✅ Email desde JSONBin
+            domicilio: cliente.domicilio || 'Ciudad Autónoma de Buenos Aires',
+            provincia: cliente.provincia || '1',
+            envia_por_mail: cliente.email ? 'S' : 'N',  // ✅ S si tiene email
+            condicion_iva: cliente.condicion_iva || 'RI',
+            condicion_pago: condicionPago
+          },
           comprobante: {
             fecha: formatDate(fechaHoy),
             vencimiento: formatDate(fechaVto),
@@ -505,6 +440,7 @@ app.post('/api/enviar-facturas', async (req, res) => {
 
         console.log('   📤 REQUEST A TUSFACTURAS:');
         console.log(`      Cliente: ${facturaData.cliente.razon_social}`);
+        console.log(`      CUIT: ${facturaData.cliente.documento_nro}`);
         console.log(`      Email: ${facturaData.cliente.email || '(sin email)'}`);
         console.log(`      Envía mail: ${facturaData.cliente.envia_por_mail}`);
         console.log(`      Total: $${facturaData.comprobante.total}`);
@@ -639,7 +575,7 @@ const server = app.listen(PORT, async () => {
   console.log('║  SILVIA MONICA NAHABETIAN                         ║');
   console.log('║  CUIT: 27233141246 • PDV: 00006                   ║');
   console.log('║  MODO: PRODUCCIÓN                                 ║');
-  console.log('║  🔍 Emails: Consulta previa + datos originales    ║');
+  console.log('║  📧 Emails: Gestionados en app                    ║');
   console.log('╚════════════════════════════════════════════════════╝\n');
   
   await cargarDatosIniciales();
